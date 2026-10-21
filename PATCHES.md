@@ -15,13 +15,21 @@
 | `wbswitch/paths.py` | `DEFAULT_EDITION = "intl"` → `"cn"` | 本机为国内版：数据根 `~/.workbuddy`、进程 `WorkBuddy.exe`。上游默认 intl 会落到不存在的 `~/.workbuddy-ai` |
 | `wbswitch/profiles.py` | 旧档案 edition 兜底 `"intl"` → `"cn"` | 双版本改造前建的账号档案没有 edition 字段，按本机版本解析 |
 
+### 引擎新增（复刻版自有功能，已收编进引擎）
+
+| 文件 | 用途 |
+|---|---|
+| `wbswitch/smartmerge.py` | 内容感知合并：仅当源会话正文更大、或同大小但标题变化时才复制进目标，复制后旧原版由 dedupe 送隔离区 |
+| `wbswitch/cli.py` | `smart-merge` 子命令（`--source/--target/--no-dedupe/--dry-run/--json`，支持 `--envelope`） |
+| `desktop/src-tauri/src/workbuddy.rs` | `wb_smart_merge` 命令（供界面调用） |
+| `desktop/src/workbuddy.js` | 账号卡片「智能合并」按钮（dry-run → 确认框 → 执行） |
+
 ### 自有模块（`ours/`，与引擎解耦，升级引擎直接覆盖源码不影响这些文件）
 
 | 模块 | 用途 |
 |---|---|
-| `ours/smart_merge.py` | 内容感知合并：补上游同根源防线盲区——仅当源会话正文更大、或同大小但标题变化时才复制进目标，复制后旧原版由 dedupe 送隔离区 |
 | `ours/validate_copy.py` | copy dry-run 校验（强制 cn、绕过忙碌检查） |
-| `ours/make_merge_bat.py` | 生成「智能合并」一键批处理（GBK 编码） |
+| `ours/bat/` | 无 GUI 等价的备胎脚本（全量 sync、清理孤儿），见其 README |
 
 ## 上游同步
 
