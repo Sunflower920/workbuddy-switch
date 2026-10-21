@@ -188,7 +188,9 @@ function rowHtml(a) {
       <div class="row-actions">
         ${!isActive && (a.archived_sessions || 0) > 0
           ? `<button class="icon-btn" title="${esc(t("wb.copySessionsTitle"))}" aria-label="${esc(t("wb.copySessions"))}"
-              click="wbActions.copySessions('${esc(a.uid)}')">${ic("dup", 16)}</button>`
+              click="wbActions.copySessions('${esc(a.uid)}')">${ic("dup", 16)}</button>
+             <button class="icon-btn" title="${esc(t("wb.mergeHint"))}" aria-label="${esc(t("wb.merge"))}"
+              click="wbActions.smartMergeSessions('${esc(a.uid)}')">${ic("merge", 16)}</button>`
           : ""}
         <button class="btn-switch has-ic" click="wbActions.switchTo('${esc(a.id)}')" ${isActive || busy ? "disabled" : ""}>
           ${isActive ? esc(t("wb.current")) : ic("swap", 14) + " " + esc(t("wb.switch"))}
@@ -657,6 +659,47 @@ export const wbActions = {
           t("wb.copyDetail", {
             copied: r.copied ?? 0, skipped: r.skipped_exists ?? 0,
             missing: r.missing_body ?? 0, failed: r.failed ?? 0,
+          }));
+        await refreshData();
+      },
+    });
+  },
+
+  /** 智能合并：仅当源账号会话比当前账号同根源会话更新时才复制并入（复刻版自有）。 */
+  async smartMergeSessions(sourceUid) {
+    const acc = (state?.accounts || []).find((x) => x.uid === sourceUid);
+    const name = acc?.name || sourceUid;
+    // 合并要写客户端独占的会话数据库与云端映射 —— 只拦该账号所属版本的客户端
+    const ed = acc?.edition || "intl";
+    if (state?.editions?.[ed]?.running) {
+      toast(t("wb.needCloseClient"), "warn", edLabel(ed));
+      return;
+    }
+
+    // 先演练拿条数，再让用户确认
+    const dry = await call("sessions", () =>
+      invoke("wb_smart_merge", { sourceUid, targetUid: null, dryRun: true }));
+    if (!dry) return;
+    const n = (dry.items || []).filter((x) => x.action === "copy").length;
+    if (!n) {
+      toast(t("wb.mergeNothing"), "warn");
+      return;
+    }
+
+    openConfirmModal({
+      kind: "warn",
+      icon: "merge",
+      title: t("wb.mergeTitle", { name }),
+      desc: esc(t("wb.mergeBody", { n })),
+      yesLabel: t("wb.merge"),
+      onYes: async () => {
+        const r = await call("sessions", () =>
+          invoke("wb_smart_merge", { sourceUid, targetUid: null, dryRun: false }));
+        if (!r) return;
+        toast(t("wb.mergeDone", { n: r.copied ?? 0 }), "ok",
+          t("wb.mergeDetail", {
+            copied: r.copied ?? 0, deduped: r.dedupe?.removed ?? 0,
+            failed: r.failed ?? 0,
           }));
         await refreshData();
       },

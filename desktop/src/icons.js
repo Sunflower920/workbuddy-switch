@@ -45,6 +45,10 @@ const ICONS = {
   clean: `<rect x="2.5" y="5.5" width="7.5" height="7.5"/>`
     + P("M5.8 5.5V2.8h7.7V10.5h-2.7")
     + P("M4.6 8.2l2.2 2.2") + P("M6.8 8.2l-2.2 2.2"),
+
+  // 智能合并：箭头汇入目标（只收更新的那份）
+  merge: P("M2.5 8h6.2") + P("M6.4 5.6 9.2 8l-2.8 2.4")
+    + `<rect x="10.6" y="4.2" width="2.6" height="7.6"/>`,
 };
 
 export function ic(name, size = 16, cls = "") {

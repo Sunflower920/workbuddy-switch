@@ -289,6 +289,42 @@ def cmd_sync(args) -> int:
     return 0
 
 
+def cmd_smart_merge(args) -> int:
+    from . import smartmerge
+
+    def progress(i, n, sid):
+        _out(f"  [{i}/{n}] {sid[:8]}...")
+
+    rep = smartmerge.smart_merge(
+        args.source,
+        getattr(args, "target", None) or None,
+        dry_run=getattr(args, "dry_run", False),
+        dedupe=not getattr(args, "no_dedupe", False),
+        on_progress=None if getattr(args, "json", False) else progress,
+    )
+    if getattr(args, "json", False):
+        _emit_json(rep)
+        return 0 if not rep["errors"] else 1
+    n_copy = sum(1 for it in rep["items"] if it["action"] == "copy")
+    tag = "[dry-run] " if rep["dry_run"] else ""
+    _out(f"{tag}planned={rep['planned']} to_copy={n_copy} "
+         f"copied={rep['copied']} failed={rep['failed']}")
+    for it in rep["items"]:
+        if it["action"] == "copy":
+            _out(f"  [COPY] {it['title'] or it['sid'][:8]}  ({it['reason']})")
+    if rep["backup_tag"]:
+        _out("  " + i18n.t("res.backup", tag=rep["backup_tag"]))
+    if rep["dedupe"]:
+        d = rep["dedupe"]
+        _out(f"  dedupe: {d['groups']} 组重复，移除 {d['removed']} 条"
+             f"（隔离区 {d['quarantine']}）")
+    for e in rep["errors"]:
+        _out(f"  ! {e}")
+    _out()
+    _out("  " + i18n.t("res.restart_hint"))
+    return 0 if not rep["errors"] else 1
+
+
 def cmd_rename(args) -> int:
     account_id = _resolve_id(args.id)
     acc = profiles.rename_account(account_id, args.name)
@@ -1305,6 +1341,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", help="只报告会改什么")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_sessions)
+
+    s = sub.add_parser(
+        "smart-merge",
+        help="内容感知合并：仅当源账号会话比目标同根源会话更新时才复制并入")
+    s.add_argument("--source", required=True, metavar="UID", help="源账号 uid")
+    s.add_argument("--target", default=None, metavar="UID",
+                   help="目标账号 uid（默认当前登录账号）")
+    s.add_argument("--no-dedupe", action="store_true",
+                   help="复制后不联动 dedupe（由调用方另行执行）")
+    s.add_argument("--dry-run", action="store_true", help="只报告会改什么")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_smart_merge)
 
     s = sub.add_parser("login", help="扫码登录新账号（需联网）")
     s.add_argument("--edition", choices=("cn", "intl"), default="cn",

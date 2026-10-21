@@ -432,6 +432,30 @@ pub async fn wb_sessions_copy(
     run(&app, &a, NETWORK_TIMEOUT_SECS).await
 }
 
+/// 内容感知合并：仅当源账号会话比目标账号同根源会话更新时才复制并入，
+/// 复制后旧原版由 dedupe 送隔离区（复刻版自有功能 smart-merge）。
+#[tauri::command]
+pub async fn wb_smart_merge(
+    app: AppHandle,
+    source_uid: String,
+    target_uid: Option<String>,
+    dry_run: bool,
+) -> Result<serde_json::Value, String> {
+    let mut a = args![
+        Arg::lit("smart-merge"),
+        Arg::lit("--source"),
+        Arg::token(&source_uid, "源账号 uid")?,
+    ];
+    if let Some(t) = target_uid.as_deref() {
+        a.push(Arg::lit("--target"));
+        a.push(Arg::token(t, "目标账号 uid")?);
+    }
+    if dry_run {
+        a.push(Arg::lit("--dry-run"));
+    }
+    run(&app, &a, NETWORK_TIMEOUT_SECS).await
+}
+
 /// 把云端归属映射修正为与档案库一致。
 #[tauri::command]
 pub async fn wb_sessions_sync_cloud(
