@@ -47,9 +47,9 @@ from pathlib import Path
 #: 版本列表（展示顺序固定：国内版在前）
 EDITIONS: tuple[str, ...] = ("cn", "intl")
 
-#: 没有版本上下文时的默认版本。工具的历史数据都来自国际版数据根，
-#  保持"默认=国际版"，让所有旧调用点在改造期行为不变。
-DEFAULT_EDITION = "intl"
+#: 没有版本上下文时的默认版本。本机为国内版（数据根 ~/.workbuddy，
+#  进程 WorkBuddy.exe），默认按 cn 解析，避免落到不存在的 ~/.workbuddy-ai。
+DEFAULT_EDITION = "cn"
 
 _EDITION_SPECS: dict[str, dict] = {
     "cn": {

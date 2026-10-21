@@ -67,3 +67,9 @@ desktop/dist/
 desktop/src-tauri/target/
 desktop/src-tauri/sidecar/
 desktop/src-tauri/gen/
+.workbuddy/
+__pycache__/
+*.pyc
+dist/
+build/
+engine.old-*/

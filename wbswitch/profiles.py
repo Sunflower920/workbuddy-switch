@@ -110,7 +110,7 @@ class Account:
             id=str(d.get("id") or ""),
             name=str(d.get("name") or ""),
             uid=str(d.get("uid") or ""),
-            edition=paths.normalize_edition(str(d.get("edition") or "")) or "intl",
+            edition=paths.normalize_edition(str(d.get("edition") or "")) or "cn",
             nickname=str(d.get("nickname") or ""),
             account_type=str(d.get("account_type") or "personal"),
             edition_type=str(d.get("edition_type") or ""),
