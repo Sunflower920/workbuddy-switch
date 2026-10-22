@@ -325,6 +325,27 @@ def cmd_smart_merge(args) -> int:
     return 0 if not rep["errors"] else 1
 
 
+def cmd_setflag(args) -> int:
+    """设置工具开关（目前支持 auto_smart_merge）。"""
+    from . import config as config_mod
+
+    allowed = {
+        "auto_smart_merge": "智能合并自动化（其他账号有更新会话且客户端未运行时自动合并）",
+    }
+    if args.name not in allowed:
+        _out(f"不支持的开关: {args.name}（可用: {', '.join(sorted(allowed))}）")
+        return 2
+    val = str(args.value).strip().lower() in ("1", "true", "yes", "on")
+    settings = config_mod.load()
+    setattr(settings, args.name, val)
+    settings.save()
+    if getattr(args, "json", False):
+        _emit_json({"name": args.name, "value": val})
+        return 0
+    _out(f"已设置 {args.name} = {val}（{allowed[args.name]}）")
+    return 0
+
+
 def cmd_rename(args) -> int:
     account_id = _resolve_id(args.id)
     acc = profiles.rename_account(account_id, args.name)
@@ -1261,6 +1282,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--id", required=True)
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_sync)
+
+    s = sub.add_parser("setflag", help="设置工具开关（auto_smart_merge 等）")
+    s.add_argument("--name", required=True, metavar="NAME", help="开关名")
+    s.add_argument("--value", required=True, metavar="BOOL", help="true / false")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_setflag)
 
     s = sub.add_parser("rename", help="重命名档案")
     s.add_argument("--id", required=True)

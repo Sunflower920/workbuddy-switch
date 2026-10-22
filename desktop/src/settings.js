@@ -66,6 +66,15 @@ const actions = {
     });
   },
 
+  // 智能合并自动化走引擎自己的 setflag（完整保留引擎的其他设置字段）
+  async toggleAutoMerge() {
+    await guard(async () => {
+      await invoke("wb_set_auto_merge", { on: !(state.auto_smart_merge ?? true) });
+      await refresh(); render();
+      toast(t("s.savedToast"));
+    });
+  },
+
   async exportAll() {
     await guard(async () => {
       const p = await invoke("export_all_pick_path");
@@ -180,6 +189,7 @@ function render() {
       ${toggle(s.launch_after_switch, "actions.toggleBehavior('launch')", t("s.launchAfter"), t("s.launchAfterDesc"))}
       ${toggle(s.close_to_tray, "actions.toggleBehavior('tray')", t("s.closeTray"), t("s.closeTrayDesc"))}
       ${toggle(s.hot_switch, "actions.toggleBehavior('hot')", t("s.hotSwitch"), t("s.hotSwitchDesc"))}
+      ${toggle(s.auto_smart_merge ?? true, "actions.toggleAutoMerge()", t("s.autoMerge"), t("s.autoMergeDesc"))}
       <label style="margin-top:14px">${t("s.authLabel")}</label>
       ${toggle(s.auth_proxy_on, "actions.toggleAuthProxy()", t("s.proxyToggle"), t("s.proxyToggleDesc"))}
       <div class="path-line" style="margin-top:6px">

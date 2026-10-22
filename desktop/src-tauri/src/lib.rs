@@ -1204,6 +1204,7 @@ pub fn run() {
             workbuddy::wb_adopt,
             workbuddy::wb_sessions_copy,
             workbuddy::wb_smart_merge,
+            workbuddy::wb_set_auto_merge,
             workbuddy::wb_sessions_sync_cloud,
             workbuddy::wb_sessions_dedupe,
             workbuddy::wb_bodies,

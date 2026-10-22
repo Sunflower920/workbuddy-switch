@@ -31,6 +31,9 @@ class Settings:
     merge_connectors: bool = True
     merge_automations: bool = True
     merge_settings: bool = True        # settings.json 里按账号隔离的段落
+    # 智能合并自动化：定期检查其他账号是否有比当前登录账号更新的会话，
+    # 客户端未运行时自动合并（引擎自带备份+隔离区）；手动合并按钮不受影响
+    auto_smart_merge: bool = True
     # 会话档案库：会话按账号长期留存本地，登录某账号时自动恢复该账号的会话
     keep_sessions: bool = True
     # 凭据级换号：把目标账号的 Cookie 写回客户端，省掉重新登录

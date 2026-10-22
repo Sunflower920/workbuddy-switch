@@ -106,6 +106,8 @@ pub struct Settings {
     pub language: Option<String>,
     #[serde(default)]
     pub auto_claim: Option<bool>,
+    #[serde(default)]
+    pub auto_smart_merge: Option<bool>,
 }
 
 impl Settings {
@@ -395,7 +397,21 @@ pub fn load_settings(paths: &Paths) -> Settings {
 
 pub fn save_settings(paths: &Paths, s: &Settings) -> Result<(), String> {
     paths.ensure_dirs()?;
-    let body = serde_json::to_string_pretty(s).unwrap_or_default() + "\n";
+    // 只覆盖本结构体管理的键，保留引擎（wbswitch）写在同一个文件里的其他
+    // 字段——否则在设置窗口切任何一个开关都会把 merge_memory /
+    // auto_capture / keep_sessions 等引擎设置冲掉（此前是潜伏的数据丢失）。
+    let mut merged: serde_json::Value = fs::read_to_string(paths.settings_file())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let (serde_json::Value::Object(m), serde_json::Value::Object(ours)) =
+        (&mut merged, serde_json::to_value(s).unwrap_or_default())
+    {
+        for (k, v) in ours {
+            m.insert(k, v);
+        }
+    }
+    let body = serde_json::to_string_pretty(&merged).unwrap_or_default() + "\n";
     atomic_write(&paths.settings_file(), &body)
 }
 

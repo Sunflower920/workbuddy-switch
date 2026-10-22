@@ -456,6 +456,23 @@ pub async fn wb_smart_merge(
     run(&app, &a, NETWORK_TIMEOUT_SECS).await
 }
 
+/// 开关：智能合并自动化（引擎 settings.json 的 auto_smart_merge）。
+/// 走引擎自己的 setflag（config.save 会完整保留所有字段），不经过
+/// set_behavior——那条路只写桌面端认识的一部分键。
+#[tauri::command]
+pub async fn wb_set_auto_merge(
+    app: AppHandle,
+    on: bool,
+) -> Result<serde_json::Value, String> {
+    run(&app, &args![
+        Arg::lit("setflag"),
+        Arg::lit("--name"),
+        Arg::lit("auto_smart_merge"),
+        Arg::lit("--value"),
+        Arg::lit(if on { "true" } else { "false" }),
+    ], DEFAULT_TIMEOUT_SECS).await
+}
+
 /// 把云端归属映射修正为与档案库一致。
 #[tauri::command]
 pub async fn wb_sessions_sync_cloud(

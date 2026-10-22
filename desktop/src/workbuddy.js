@@ -103,6 +103,7 @@ export async function refresh({ silent = true } = {}) {
   if (silent) await doIt();
   else await call("refresh", doIt);   // 按钮刷新要可见：显示忙锁条并禁用按钮
   rerender();
+  startAutoMergeWatcher();            // 幂等：确保后台合并检查器在跑
 }
 
 /** 只刷新会变化的部分（切号 / 签到之后）。 */
@@ -110,6 +111,82 @@ async function refreshData() {
   state = await load(() => invoke("wb_state"));
   sessions = await load(() => invoke("wb_sessions"));
   rerender();
+  startAutoMergeWatcher();
+}
+
+// ---------------------------------------------------------------- 自动合并
+// 设置里开了 auto_smart_merge（默认开）时：定期对其他账号跑 dry-run
+// （只读），发现有比当前登录账号更新的会话就——
+//   客户端没在跑  -> 自动合并（引擎自带全量备份 + 旧版进隔离区）
+//   客户端在跑    -> 账号行显示待合并角标，退出客户端后的下一轮自动合上
+// 手动「智能合并」按钮始终可用，不受这里影响。
+const AUTO_MERGE_INTERVAL_MS = 180000;   // 3 分钟一轮
+let autoMergePending = {};                // uid -> {name, n}
+let autoMergeTimer = null;
+let autoMergeRunning = false;
+
+function autoMergeOn() {
+  return state?.settings?.auto_smart_merge !== false;
+}
+
+function liveLoginUid() {
+  for (const ed of Object.values(state?.editions || {})) {
+    if (ed.live_uid) return ed.live_uid;
+  }
+  return null;
+}
+
+function anyClientRunning() {
+  return Object.values(state?.editions || {}).some((e) => e.running);
+}
+
+async function checkAutoMerge() {
+  if (autoMergeRunning || busy || !autoMergeOn() || !state) return;
+  const cur = liveLoginUid();
+  if (!cur) return;
+  const targets = (state.accounts || []).filter(
+    (a) => a.uid !== cur && (a.archived_sessions || 0) > 0);
+  if (!targets.length) {
+    autoMergePending = {};
+    return;
+  }
+  autoMergeRunning = true;
+  try {
+    const pend = {};
+    for (const a of targets) {
+      const dry = await load(() =>
+        invoke("wb_smart_merge", { sourceUid: a.uid, targetUid: null, dryRun: true }));
+      if (!dry) continue;
+      const n = (dry.items || []).filter((x) => x.action === "copy").length;
+      if (n > 0) pend[a.uid] = { name: a.name, n };
+    }
+    autoMergePending = pend;
+    const total = Object.values(pend).reduce((s, p) => s + p.n, 0);
+    // 客户端未运行 = 可以安全写库的时机，自动合并
+    if (total > 0 && !anyClientRunning()) {
+      for (const [uid, p] of Object.entries(pend)) {
+        const r = await call("merge", () =>
+          invoke("wb_smart_merge", { sourceUid: uid, targetUid: null, dryRun: false }));
+        if (r && r.copied) {
+          toast(t("wb.autoMergeDone", { name: p.name, n: r.copied }), "ok",
+            t("wb.autoMergeDetail", {
+              copied: r.copied, deduped: r.dedupe?.removed ?? 0,
+            }));
+        }
+        delete autoMergePending[uid];
+      }
+      await refresh({ silent: true });
+    }
+    rerender();
+  } finally {
+    autoMergeRunning = false;
+  }
+}
+
+function startAutoMergeWatcher() {
+  if (autoMergeTimer) return;
+  autoMergeTimer = setInterval(checkAutoMerge, AUTO_MERGE_INTERVAL_MS);
+  setTimeout(checkAutoMerge, 10000);   // 首轮稍延迟，避开启动高峰
 }
 
 // ---------------------------------------------------------------- 渲染
@@ -188,7 +265,10 @@ function rowHtml(a) {
       </div>
       <div class="row-actions">
         ${!isActive && (a.archived_sessions || 0) > 0
-          ? `<button class="icon-btn" title="${esc(t("wb.copySessionsTitle"))}" aria-label="${esc(t("wb.copySessions"))}"
+          ? `${autoMergePending[a.uid]
+              ? `<span class="merge-badge" title="${esc(t("wb.autoMergeBadge", { n: autoMergePending[a.uid].n }))}">${autoMergePending[a.uid].n}</span>`
+              : ""}
+             <button class="icon-btn" title="${esc(t("wb.copySessionsTitle"))}" aria-label="${esc(t("wb.copySessions"))}"
               click="wbActions.copySessions('${esc(a.uid)}')">${ic("dup", 16)}</button>
              <button class="icon-btn" title="${esc(t("wb.mergeHint"))}" aria-label="${esc(t("wb.merge"))}"
               click="wbActions.smartMergeSessions('${esc(a.uid)}')">${ic("merge", 16)}</button>`
