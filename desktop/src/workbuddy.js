@@ -54,7 +54,8 @@ export function isActive() {
  */
 async function call(label, fn, { silent = false } = {}) {
   if (busy) {
-    toast(t("wb.busy"), "warn");
+    // 同一操作重复触发（双击/手快）：静默忽略，不弹警告吓用户
+    if (busy !== label) toast(t("wb.busy"), "warn");
     return undefined;
   }
   busy = label;
@@ -100,7 +101,7 @@ export async function refresh({ silent = true } = {}) {
     backups = await load(() => invoke("wb_backups"));
   };
   if (silent) await doIt();
-  else await call("refresh", doIt, { silent: true });
+  else await call("refresh", doIt);   // 按钮刷新要可见：显示忙锁条并禁用按钮
   rerender();
 }
 
