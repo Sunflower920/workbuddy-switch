@@ -222,3 +222,31 @@ export function openProviderModal(m) {
   const first = mask.querySelector(".pv-item");
   if (first) first.focus();
 }
+
+// ---- 主题：浅色 / 深色 ----
+// 选择持久化在 localStorage；首次打开跟随系统偏好。切换只改 <html> 上的
+// data-theme，配色全部走 CSS 变量（styles.css 的 :root[data-theme="light"]）。
+const THEME_KEY = "sw-theme";
+
+export function currentTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === "light" || saved === "dark") return saved;
+  return matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+export function applyTheme(th) {
+  document.documentElement.dataset.theme = th;
+  try { localStorage.setItem(THEME_KEY, th); } catch { /* 无痕模式等：忽略 */ }
+}
+
+export function toggleTheme() {
+  applyTheme(currentTheme() === "light" ? "dark" : "light");
+}
+
+/** 主题切换按钮：深色下显示太阳（点它进浅色），浅色下显示月亮（点它进深色）。 */
+export function themeBtnHtml(handler) {
+  const toLight = currentTheme() !== "light";
+  const label = t(toLight ? "btn.themeToLight" : "btn.themeToDark");
+  return `<button class="icon-btn theme-toggle" click="${handler}"
+    title="${esc(label)}" aria-label="${esc(label)}">${ic(toLight ? "sun" : "moon", 16)}</button>`;
+}

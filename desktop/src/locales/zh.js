@@ -350,6 +350,8 @@ export const zh = {
   "wb.mergeNothing": "没有比当前账号更新的会话",
   "wb.mergeDone": "已合并 {n} 条会话",
   "wb.mergeDetail": "复制 {copied} · 旧版退位 {deduped} · 失败 {failed}",
+  "btn.themeToLight": "切换到浅色背景",
+  "btn.themeToDark": "切换到深色背景",
   "wb.cloudMissing": "客户端没有云端归属映射库（旧版本），已跳过云端检查",
   "wb.syncCloudDone": "云端归属已修正 {n} 条",
   "wb.cloudOk": "云端归属与档案库一致",

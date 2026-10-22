@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { esc, toast, openPwModal, installDelegation, dismissSplash } from "./ui.js";
+import { esc, toast, openPwModal, installDelegation, dismissSplash, currentTheme, applyTheme } from "./ui.js";
 import { ic } from "./icons.js";
 import { init, t, lang, stripErr } from "./i18n.js";
+
+applyTheme(currentTheme());   // 设置窗口跟随主界面已选的主题
 
 const $app = document.getElementById("app");
 let state = null;

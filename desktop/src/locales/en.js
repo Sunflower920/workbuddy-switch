@@ -350,6 +350,8 @@ export const en = {
   "wb.mergeNothing": "No sessions newer than the current account",
   "wb.mergeDone": "Merged {n} sessions",
   "wb.mergeDetail": "Copied {copied} · retired {deduped} · failed {failed}",
+  "btn.themeToLight": "Switch to light theme",
+  "btn.themeToDark": "Switch to dark theme",
   "wb.cloudMissing": "Client has no cloud-ownership mapping DB (older version); cloud check skipped",
   "wb.syncCloudDone": "Cloud ownership fixed for {n} session(s)",
   "wb.cloudOk": "Cloud ownership matches the archive",

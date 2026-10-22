@@ -1188,3 +1188,80 @@ input:focus-visible,
   .tabs { margin-left: 8px; margin-right: 8px; }
   .tabs .tab { padding: 3px 9px; font-size: 12px; }
 }
+
+/* ==========================================================================
+   浅色主题（data-theme="light" 挂在 <html> 上，见 main.js 的主题逻辑）
+   变量整体覆写；下面再逐个收拾硬编码的暗色点缀。
+   ========================================================================== */
+:root[data-theme="light"] {
+  --bg: #f4f2ec;
+  --bg-2: #fbf9f4;
+  --panel: #ffffff;
+  --panel-2: #efece3;
+  --hairline: #ddd8ca;
+  --hairline-soft: #e6e1d4;
+  --ink: #2b2924;
+  --ink-dim: #5b584f;
+  --ink-mute: #8a8578;
+  --amber: #b07517;
+  --amber-deep: #94610f;
+  --amber-ink: #fff8ec;
+  --mint: #3a8549;
+  --mint-dim: #2c6839;
+  --blue: #3d6d9e;
+  --blue-dim: #2f5478;
+  --red: #bf4444;
+  --red-dim: #a03a3a;
+  --notch-1: #b07517;
+  --notch-2: #3d6d9e;
+  --notch-3: #8a5fc0;
+  --notch-4: #c04f75;
+  --notch-5: #2f8f80;
+  --notch-6: #96862f;
+}
+:root[data-theme="light"] body {
+  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 220px);
+}
+:root[data-theme="light"] .live-card.unsaved { border-color: #e0d2a6; }
+:root[data-theme="light"] .stripe {
+  background:
+    repeating-linear-gradient(115deg,
+      #f2efe6 0px, #f2efe6 10px,
+      #e9e5d9 10px, #e9e5d9 20px);
+}
+:root[data-theme="light"] .stripe::after {
+  background: linear-gradient(90deg, #d9d5c9, #c4c0b2);
+}
+:root[data-theme="light"] .led.off { background: #c5c1b6; }
+:root[data-theme="light"] .list { scrollbar-color: #c9c5b8 transparent; }
+:root[data-theme="light"] .empty .glyph { color: #a9a498; }
+:root[data-theme="light"] .row.active {
+  border-color: #d3bd85;
+  background: #faf4e4;
+}
+:root[data-theme="light"] .btn-ghost:hover:not(:disabled) { border-color: #d2cec2; }
+:root[data-theme="light"] .btn-primary:hover:not(:disabled) { background: #d99a2e; }
+:root[data-theme="light"] .toast {
+  background: #ffffff;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .14);
+}
+:root[data-theme="light"] .toast.err { color: #a84444; }
+:root[data-theme="light"] .toast.err .detail { color: #966060; }
+
+/* 顶栏右侧分组：状态 + 主题切换按钮（topbar 是 space-between，多一个子项
+   会打乱分布，所以把两者包起来保持三个 flex 子项） */
+.top-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.topbar .icon-btn.theme-toggle {
+  width: 30px;
+  height: 30px;
+  background: var(--bg-2);
+}
+.topbar .icon-btn.theme-toggle:hover {
+  color: var(--amber);
+  border-color: var(--hairline);
+  background: var(--panel-2);
+}

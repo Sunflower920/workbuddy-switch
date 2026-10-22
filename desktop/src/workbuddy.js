@@ -10,7 +10,7 @@
 //   2. 任何操作期间把界面置为 loading，按钮禁用，避免重复点击；
 //   3. 后端返回的是 JSON，字段可能缺失（不同版本引擎），渲染时一律做兜底。
 import { invoke } from "@tauri-apps/api/core";
-import { esc, toast, openConfirmModal } from "./ui.js";
+import { esc, toast, openConfirmModal, toggleTheme as flipTheme, themeBtnHtml } from "./ui.js";
 import { ic } from "./icons.js";
 import { t } from "./i18n.js";
 
@@ -393,9 +393,12 @@ export function viewHtml(tabsHtml) {
   <header class="topbar">
     <div class="wordmark">SwitchSuite${state?.app_version ? ` <span class="ver">v${esc(state.app_version)}</span>` : ""}</div>
     ${tabsHtml}
-    <div class="top-status">
-      <span class="status-dot ${statusDotCls()}"></span>
-      <span class="status-text">${esc(statusText())}</span>
+    <div class="top-end">
+      <div class="top-status">
+        <span class="status-dot ${statusDotCls()}"></span>
+        <span class="status-text">${esc(statusText())}</span>
+      </div>
+      ${themeBtnHtml("wbActions.toggleTheme()")}
     </div>
   </header>`;
 
@@ -496,6 +499,9 @@ export const wbActions = {
   async reload() {
     await call("refresh", () => refresh({ silent: false }), { silent: false });
   },
+
+  /** 主题切换：浅色/深色，选择持久化，切完重绘换图标。 */
+  toggleTheme() { flipTheme(); rerender(); },
 
   async switchTo(id) {
     const acc = (state?.accounts || []).find((a) => a.id === id);

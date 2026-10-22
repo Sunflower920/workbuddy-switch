@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { esc, toast, openPwModal, openConfirmModal, openProviderModal, installDelegation, dismissSplash } from "./ui.js";
+import { esc, toast, openPwModal, openConfirmModal, openProviderModal, installDelegation, dismissSplash, currentTheme, applyTheme, toggleTheme as flipTheme, themeBtnHtml } from "./ui.js";
 import { ic } from "./icons.js";
 import { init, t, has, lang, localeTag, stripErr } from "./i18n.js";
 import * as wb from "./workbuddy.js";
@@ -142,6 +142,9 @@ function autoPillTitle(s) {
 
 const actions = {
   async refresh() { await refresh(); render(); },
+
+  /** 主题切换：浅色/深色，选择持久化，切完重绘换图标。 */
+  toggleTheme() { flipTheme(); render(); },
 
   /** 切换视图页签。两个后端互不影响，切走时只做必要的清理。 */
   async setView(next) {
@@ -879,9 +882,12 @@ function render() {
     <header class="topbar">
       <div class="wordmark">Z·SWITCH${appVer ? ` <span class="ver">v${esc(appVer)}</span>` : ""}</div>
       ${tabsHtml()}
-      <div class="top-status${unsaved ? " unsaved" : ""}">
-        <span class="status-dot ${dotCls}"></span>
-        <span class="status-text">${esc(statusText)}</span>
+      <div class="top-end">
+        <div class="top-status${unsaved ? " unsaved" : ""}">
+          <span class="status-dot ${dotCls}"></span>
+          <span class="status-text">${esc(statusText)}</span>
+        </div>
+        ${themeBtnHtml("actions.toggleTheme()")}
       </div>
     </header>
 
@@ -931,6 +937,7 @@ function render() {
 }
 
 window.actions = actions;
+applyTheme(currentTheme());   // 首帧就落对主题，避免闪一下深色
 window.onRenameKey = (e, id) => {
   if (e.key === "Enter") actions.doRename(id);
   if (e.key === "Escape") actions.cancelRename();
