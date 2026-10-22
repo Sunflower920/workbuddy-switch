@@ -1309,6 +1309,11 @@ def _copy_sessions_bound(source_uid: str, target_uid: str | None = None,
             # ④ 客户端索引：新行（新 id + 目标 user_id，其余字段原样）
             rowd["id"] = new_sid
             rowd["user_id"] = report.target_uid
+            # 标题钉进 custom_title（用户改名槽）：客户端只重算 title（自动
+            # 生成槽），副本带过来的标题进了 title 槽、custom_title 为空，
+            # 等于没锁——在新消息触发自动标题重算时会被改写，表现为"改名了"
+            if rowd.get("title") and not rowd.get("custom_title"):
+                rowd["custom_title"] = rowd["title"]
             try:
                 if n_cols == 30:
                     live.execute(
@@ -1412,6 +1417,56 @@ class DedupeReport:
         if self.cleared_errors:
             bits.append(f"清除错误标记 {self.cleared_errors} 条")
         return " · ".join(bits)
+
+
+def pin_copy_titles(*, dry_run: bool = False) -> dict:
+    """把副本会话的标题钉进 custom_title（用户改名槽）。
+
+    客户端只重算 title（自动生成槽）从不碰 custom_title；早前复制的
+    副本标题只写在 title 槽，新消息触发自动标题重算时会被改写
+    （表现为"同步过的会话发一条消息就改名"）。这里一次性补齐。
+    只钉谱系里的副本，不动用户自己的原始会话。
+    """
+    if not dry_run and client_mod.is_running():
+        return {"errors": ["WorkBuddy 正在运行：请先结束客户端"], "pinned": 0}
+    arch = _conn()
+    copies = {str(r[0]) for r in arch.execute("SELECT copy_id FROM copy_lineage")}
+    live = _live_conn()
+    try:
+        cur = live.execute("SELECT * FROM sessions")
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        targets = [r for r in rows
+                   if r.get("id") in copies
+                   and r.get("title") and not r.get("custom_title")]
+        if dry_run:
+            return {"dry_run": True, "pinned": 0, "would_pin": len(targets),
+                    "titles": [r["title"] for r in targets], "errors": []}
+        if targets:
+            info = engine.create_backup("", "", "before-pin-titles")
+            backup_tag = info.tag
+        else:
+            backup_tag = ""
+        n = 0
+        for r in targets:
+            live.execute("UPDATE sessions SET custom_title = ? WHERE id = ?",
+                         (r["title"], r["id"]))
+            n += 1
+        live.commit()
+        try:
+            live.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass
+        return {"pinned": n, "backup_tag": backup_tag, "errors": []}
+    finally:
+        try:
+            live.close()
+        except Exception:
+            pass
+        try:
+            arch.close()
+        except Exception:
+            pass
 
 
 def dedupe_sessions(uid: str, *, dry_run: bool = False,

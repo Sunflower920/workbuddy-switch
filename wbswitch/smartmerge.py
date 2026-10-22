@@ -223,6 +223,10 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
             # ④ 客户端索引：新行（新 id + 目标 user_id，其余字段原样）
             rowd["id"] = new_sid
             rowd["user_id"] = target_uid
+            # 标题钉进 custom_title（用户改名槽）：客户端只重算 title（自动
+            # 生成槽），不锁的副本在新消息触发重算时会被改写，表现为"改名了"
+            if rowd.get("title") and not rowd.get("custom_title"):
+                rowd["custom_title"] = rowd["title"]
             try:
                 live.execute(insert_sql, [rowd.get(c) for c in cols])
             except sqlite3.Error as e:

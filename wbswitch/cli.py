@@ -509,6 +509,22 @@ def cmd_diagnose(args) -> int:
 
 def cmd_sessions(args) -> int:
     """查看或操作会话档案库。"""
+    if getattr(args, "pin_titles", False):
+        rep = sessions.pin_copy_titles(dry_run=getattr(args, "dry_run", False))
+        if getattr(args, "json", False):
+            _emit_json(rep)
+            return 0 if not rep["errors"] else 1
+        if rep.get("dry_run"):
+            _out(f"[dry-run] 将钉住 {rep['would_pin']} 条副本会话的标题")
+            for t in rep.get("titles", []):
+                _out(f"  {t}")
+            return 0
+        _out(f"已钉住 {rep['pinned']} 条副本会话的标题"
+             + (f"（备份 {rep['backup_tag']}）" if rep.get("backup_tag") else ""))
+        for e in rep["errors"]:
+            _out(f"  ! {e}")
+        return 0 if not rep["errors"] else 1
+
     if getattr(args, "capture", False):
         by_ed: dict[str, int] = {}
         for ed in paths.edition_ids():
@@ -1360,6 +1376,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("--clear-error", action="store_true",
                    help="去重时顺带把保留副本的 status='error'（红色感叹号）复位")
+    s.add_argument("--pin-titles", action="store_true",
+                   help="把副本会话的标题钉进 custom_title（客户端只重算自动"
+                        "标题槽，钉住后发新消息也不会改名）")
     s.add_argument("--sync-cloud", action="store_true",
                    help="把云端归属映射修正为与档案库一致")
     s.add_argument("--edition", choices=("cn", "intl"), default=None,

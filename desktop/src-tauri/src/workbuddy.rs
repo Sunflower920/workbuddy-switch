@@ -456,6 +456,20 @@ pub async fn wb_smart_merge(
     run(&app, &a, NETWORK_TIMEOUT_SECS).await
 }
 
+/// 把副本会话的标题钉进 custom_title（客户端只重算自动标题槽，
+/// 不锁的副本发新消息会改名）。需客户端退出。
+#[tauri::command]
+pub async fn wb_pin_titles(
+    app: AppHandle,
+    dry_run: bool,
+) -> Result<serde_json::Value, String> {
+    let mut a = args![Arg::lit("sessions"), Arg::lit("--pin-titles")];
+    if dry_run {
+        a.push(Arg::lit("--dry-run"));
+    }
+    run(&app, &a, NETWORK_TIMEOUT_SECS).await
+}
+
 /// 开关：智能合并自动化（引擎 settings.json 的 auto_smart_merge）。
 /// 走引擎自己的 setflag（config.save 会完整保留所有字段），不经过
 /// set_behavior——那条路只写桌面端认识的一部分键。

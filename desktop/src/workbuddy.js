@@ -357,6 +357,9 @@ function sessionsHtml() {
     </div>
     <div class="wb-actions">
       ${btn(t("wb.archiveBodies"), "capture", "wbActions.archiveBodies()", { disabled: !!busy })}
+      ${btn(t("wb.pinTitles"), "lock", "wbActions.pinCopyTitles()", {
+          disabled: !!busy, title: t("wb.pinTitlesTitle"),
+        })}
       ${(mv.driftCount || mv.cloudCount)
         ? btn(t("wb.fixDrift"), "refresh", "wbActions.fixDrift()", {
             disabled: !!busy, kind: "primary",
@@ -799,6 +802,36 @@ export const wbActions = {
             copied: r.copied ?? 0, deduped: r.dedupe?.removed ?? 0,
             failed: r.failed ?? 0,
           }));
+        await refreshData();
+      },
+    });
+  },
+
+  /** 修复副本标题：把复制/同步来的会话标题钉进 custom_title（不再被自动标题改写）。 */
+  async pinCopyTitles() {
+    // 要写客户端数据库——只拦各版本客户端
+    if (Object.values(state?.editions || {}).some((e) => e.running)) {
+      toast(t("wb.needCloseClient"), "warn");
+      return;
+    }
+    const dry = await call("sessions", () =>
+      invoke("wb_pin_titles", { dryRun: true }));
+    if (!dry) return;
+    if (!dry.would_pin) {
+      toast(t("wb.pinTitlesNone"), "ok");
+      return;
+    }
+    openConfirmModal({
+      kind: "warn",
+      icon: "lock",
+      title: t("wb.pinTitlesTitle"),
+      desc: esc(t("wb.pinTitlesBody", { n: dry.would_pin })),
+      yesLabel: t("wb.pinTitles"),
+      onYes: async () => {
+        const r = await call("sessions", () =>
+          invoke("wb_pin_titles", { dryRun: false }));
+        if (!r) return;
+        toast(t("wb.pinTitlesDone", { n: r.pinned ?? 0 }), "ok");
         await refreshData();
       },
     });
