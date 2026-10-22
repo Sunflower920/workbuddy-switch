@@ -250,3 +250,33 @@ export function themeBtnHtml(handler) {
   return `<button class="icon-btn theme-toggle" click="${handler}"
     title="${esc(label)}" aria-label="${esc(label)}">${ic(toLight ? "sun" : "moon", 16)}</button>`;
 }
+
+/** 只读长列表模态框（模型清单 / 额度明细）：toast 装不下的内容用它完整展示。 */
+export function openListModal({ title, icon = "empty", lines = [], closeLabel }) {
+  document.querySelector(".cm-mask")?.remove();
+  const mask = document.createElement("div");
+  mask.className = "cm-mask";
+  const rows = (lines || []).map((l) => `<div class="lm-row">${esc(l)}</div>`).join("");
+  mask.innerHTML = `
+    <div class="cm-panel lm-panel" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <div class="cm-head">
+        <span class="cm-ic plain">${ic(icon, 21)}</span>
+        <div class="cm-title">${esc(title)}</div>
+      </div>
+      <div class="lm-list">${rows || `<div class="wb-dim lm-empty">${esc(t("common.noData"))}</div>`}</div>
+      <div class="cm-actions">
+        <button class="btn-ghost cm-ok">${esc(closeLabel || t("common.close"))}</button>
+      </div>
+    </div>`;
+  const panel = mask.querySelector(".cm-panel");
+  const close = () => {
+    document.removeEventListener("keydown", mask._key);
+    mask.remove();
+  };
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  mask.addEventListener("click", close);
+  mask.querySelector(".cm-ok").addEventListener("click", close);
+  mask._key = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", mask._key);
+  mask.querySelector(".cm-ok").focus();
+}

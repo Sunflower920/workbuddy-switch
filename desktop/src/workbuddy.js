@@ -10,7 +10,7 @@
 //   2. 任何操作期间把界面置为 loading，按钮禁用，避免重复点击；
 //   3. 后端返回的是 JSON，字段可能缺失（不同版本引擎），渲染时一律做兜底。
 import { invoke } from "@tauri-apps/api/core";
-import { esc, toast, openConfirmModal, toggleTheme as flipTheme, themeBtnHtml } from "./ui.js";
+import { esc, toast, openConfirmModal, openListModal, toggleTheme as flipTheme, themeBtnHtml } from "./ui.js";
 import { ic } from "./icons.js";
 import { t } from "./i18n.js";
 
@@ -498,7 +498,8 @@ function showText(title, lines) {
 
 export const wbActions = {
   async reload() {
-    await call("refresh", () => refresh({ silent: false }), { silent: false });
+    // 直接走 refresh 内部的 call（忙锁条+按钮禁用都在那里），不要再包一层
+    await refresh({ silent: false });
   },
 
   /** 主题切换：浅色/深色，选择持久化，切完重绘换图标。 */
@@ -563,15 +564,25 @@ export const wbActions = {
       if (!x.ok) return `${x.name}: ${x.error}`;
       return `${x.name}: ${x.remain}/${x.total}${x.checkin ? " · " + x.checkin : ""}`;
     });
-    showText(t("wb.credits"), lines);
+    openListModal({ title: t("wb.credits"), icon: "gauge", lines });
   },
 
   async models() {
     const r = await call("models", () => invoke("wb_models"));
     if (!r) return;
     const list = Array.isArray(r) ? r : [];
-    showText(t("wb.modelsTitle", { n: list.length }),
-      list.map((m) => `${m.id}${m.credits ? " " + m.credits : ""}`));
+    // 几十个模型 toast 装不下，用可滚动列表模态框完整展示
+    openListModal({
+      title: t("wb.modelsTitle", { n: list.length }),
+      icon: "empty",
+      lines: list.map((m) => {
+        const bits = [m.id || "?"];
+        if (m.credits) bits.push(`x${m.credits}`);
+        if (m.context_window) bits.push(`ctx ${Math.round(m.context_window / 1024)}K`);
+        if (m.default) bits.push(t("wb.modelsDefault"));
+        return bits.join("   ");
+      }),
+    });
   },
 
   async archiveBodies() {

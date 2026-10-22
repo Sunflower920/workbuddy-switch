@@ -1265,3 +1265,27 @@ input:focus-visible,
   border-color: var(--hairline);
   background: var(--panel-2);
 }
+
+/* 只读长列表模态框（模型清单 / 额度明细） */
+.lm-panel { max-width: 560px; }
+.lm-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  margin: 2px 0 4px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+.lm-row {
+  padding: 7px 12px;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  color: var(--ink-dim);
+  border-bottom: 1px solid var(--hairline-soft);
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.lm-row:last-child { border-bottom: none; }
+.lm-row:hover { background: var(--panel-2); color: var(--ink); }
+.lm-empty { padding: 18px 12px; text-align: center; }
