@@ -73,3 +73,6 @@ __pycache__/
 dist/
 build/
 engine.old-*/
+installer/
+installer/
+installer/

@@ -278,5 +278,6 @@ export function openListModal({ title, icon = "empty", lines = [], closeLabel })
   mask.querySelector(".cm-ok").addEventListener("click", close);
   mask._key = (e) => { if (e.key === "Escape") close(); };
   document.addEventListener("keydown", mask._key);
+  document.body.appendChild(mask);   // 别忘了挂到页面上，否则什么都不显示
   mask.querySelector(".cm-ok").focus();
 }
