@@ -1427,6 +1427,7 @@ def pin_copy_titles(*, dry_run: bool = False) -> dict:
     （表现为"同步过的会话发一条消息就改名"）。这里一次性补齐。
     只钉谱系里的副本，不动用户自己的原始会话。
     """
+    from . import client as client_mod, engine   # 本模块的惯例：函数内导入
     if not dry_run and client_mod.is_running():
         return {"errors": ["WorkBuddy 正在运行：请先结束客户端"], "pinned": 0}
     arch = _conn()
