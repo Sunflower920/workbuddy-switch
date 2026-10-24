@@ -581,7 +581,9 @@ fn zcode_from_shortcuts() -> Vec<String> {
                 Err(_) => continue,
             };
             if let Some(base) = parse_lnk_base_path(&data) {
-                let exe = format!("{}\\ZCode.exe", base.trim_end_matches(|c| c == '\\' || c == '/'));
+                // lnk 里可能是斜杠风格，统一成反斜杠再拼
+                let base = base.replace('/', "\\");
+                let exe = format!("{}\\ZCode.exe", base.trim_end_matches('\\'));
                 if PathBuf::from(&exe).exists() && !found.iter().any(|x| x.eq_ignore_ascii_case(&exe)) {
                     found.push(exe);
                 }
@@ -700,11 +702,12 @@ fn le_u32(b: &[u8], off: usize) -> Option<u32> {
 #[cfg(windows)]
 fn looks_like_path(s: &str) -> bool {
     let b = s.as_bytes();
-    if s.len() < 6 || !s.contains('\\') {
+    // Windows 上斜杠/反斜杠都是合法分隔符，两种都认
+    if s.len() < 6 || !(s.contains('\\') || s.contains('/')) {
         return false;
     }
     let drive = b.len() > 1 && b[0].is_ascii_alphabetic() && b[1] == b':';
-    (drive || s.starts_with("\\\\")) && b.iter().all(|&c| c >= 0x20)
+    (drive || s.starts_with("\\\\") || s.starts_with("//")) && b.iter().all(|&c| c >= 0x20)
 }
 
 #[cfg(windows)]
@@ -1904,18 +1907,18 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn lnk_unicode_local_base_path() {
-        let d = build_lnk(1, r"D:/Apps/ZCode/ZCode.exe", true);
-        assert_eq!(parse_lnk_base_path(&d).as_deref(), Some(r"D:/Apps/ZCode/ZCode.exe"));
+        let d = build_lnk(1, r"D:\Apps\ZCode\ZCode.exe", true);
+        assert_eq!(parse_lnk_base_path(&d).as_deref(), Some(r"D:\Apps\ZCode\ZCode.exe"));
     }
 
     #[cfg(windows)]
     #[test]
     fn lnk_ansi_local_base_path() {
         // 规范 ANSI：标志位 0
-        let d = build_lnk(0, r"D:/Program FilesData/ZCode/ZCode.exe", false);
+        let d = build_lnk(0, r"D:\Program FilesData\ZCode\ZCode.exe", false);
         assert_eq!(
             parse_lnk_base_path(&d).as_deref(),
-            Some(r"D:/Program FilesData/ZCode/ZCode.exe")
+            Some(r"D:\Program FilesData\ZCode\ZCode.exe")
         );
     }
 
@@ -1924,10 +1927,10 @@ mod tests {
     fn lnk_ansi_with_unicode_flag_still_parses() {
         // 怪癖文件：标志位置 1（Unicode）却写 ANSI——UTF-16 解码得到乱码被
         // looks_like_path 拒掉，回退 ANSI 拿到正确路径（真实用户文件即此形态）
-        let d = build_lnk(1, r"D:/Program FilesData/ZCode/ZCode.exe", false);
+        let d = build_lnk(1, r"D:\Program FilesData\ZCode\ZCode.exe", false);
         assert_eq!(
             parse_lnk_base_path(&d).as_deref(),
-            Some(r"D:/Program FilesData/ZCode/ZCode.exe")
+            Some(r"D:\Program FilesData\ZCode\ZCode.exe")
         );
     }
 
@@ -1958,13 +1961,13 @@ mod tests {
         d.extend_from_slice(&0u32.to_le_bytes());
         d.extend_from_slice(&0u32.to_le_bytes());
         // 之后是 UTF-16 路径块（模拟 extra data）
-        for u in r"D:/Portable/ZCode/ZCode.exe".encode_utf16() {
+        for u in r"D:\Portable\ZCode\ZCode.exe".encode_utf16() {
             d.extend_from_slice(&u.to_le_bytes());
         }
         d.extend_from_slice(&[0, 0]);
         assert_eq!(
             parse_lnk_base_path(&d).as_deref(),
-            Some(r"D:/Portable/ZCode/ZCode.exe")
+            Some(r"D:\Portable\ZCode\ZCode.exe")
         );
     }
 
@@ -1972,28 +1975,21 @@ mod tests {
     #[test]
     fn reg_output_extracts_install_dir() {
         // 真实 reg query 输出形态（本机 ZCode 3.16.3 卸载项）
-        let out = "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\268ce9e6-a30b-5890-ad18-d4b3ebba5377\r\n\
-                   \r\n\
-                       DisplayName    REG_SZ    ZCode 3.16.3\r\n\
-                       DisplayIcon    REG_SZ    D://Program FilesData\\ZCode\\uninstallerIcon.ico\r\n\
-                       UninstallString    REG_SZ    \"D://Program FilesData//ZCode//Uninstall ZCode.exe/" /allusers\r\n\
-                   \r\n";
+        let out = "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\268ce9e6-a30b-5890-ad18-d4b3ebba5377\r\n    DisplayName    REG_SZ    ZCode 3.16.3\r\n    DisplayIcon    REG_SZ    D:\\Program FilesData\\ZCode\\uninstallerIcon.ico\r\n    UninstallString    REG_SZ    \"D:\\Program FilesData\\ZCode\\Uninstall ZCode.exe\" /allusers\r\n\r\n";
         let v = zcode_exe_from_reg_output(out);
-        assert_eq!(v, vec![r"D:/Program FilesData/ZCode/ZCode.exe".to_string()]);
+        assert_eq!(v, vec![r"D:\Program FilesData\ZCode\ZCode.exe".to_string()]);
     }
 
     #[cfg(windows)]
     #[test]
     fn reg_output_ignores_unrelated_keys() {
-        let out = "HKEY_CURRENT_USER\\Software\\...\\Uninstall\\SwitchSuite\r\n\
-                       DisplayName    REG_SZ    SwitchSuite\r\n\
-                       DisplayIcon    REG_SZ    \"C://Users//WG-WYZ//AppData//Local//SwitchSuite//zcode-switch.exe/"\r\n";
+        let out = "HKEY_CURRENT_USER\\Software\\...\\Uninstall\\SwitchSuite\r\n    DisplayName    REG_SZ    SwitchSuite\r\n    DisplayIcon    REG_SZ    \"C:\\Users\\WG-WYZ\\AppData\\Local\\SwitchSuite\\zcode-switch.exe\"\r\n";
         // SwitchSuite 的值名虽在名单里，但目录下没有 ZCode.exe——
         // 本函数只做提取，存在性由调用方验；这里断言提取结果符合预期形状
         let v = zcode_exe_from_reg_output(out);
         assert_eq!(
             v,
-            vec![r"C:/Users/WG-WYZ/AppData/Local/SwitchSuite/ZCode.exe".to_string()]
+            vec![r"C:\Users\WG-WYZ\AppData\Local\SwitchSuite\ZCode.exe".to_string()]
         );
     }
 
@@ -2011,34 +2007,34 @@ mod tests {
             serde_json::to_string(&serde_json::json!({ "zcode_path": real })).unwrap(),
         )
         .unwrap();
-        let (p, ok) = effective_zcode_path_in(&paths, &[r"C:/nope/ZCode.exe".into()], &[]);
+        let (p, ok) = effective_zcode_path_in(&paths, &[r"C:\nope\ZCode.exe".into()], &[]);
         assert!(ok);
         assert_eq!(p, real);
 
         // 2) 无设置 → 标准候选命中
         fs::write(paths.settings_file(), "{}").unwrap();
         let (p, ok) =
-            effective_zcode_path_in(&paths, &[r"C:/nope/ZCode.exe".into(), real.clone()], &[]);
+            effective_zcode_path_in(&paths, &[r"C:\nope\ZCode.exe".into(), real.clone()], &[]);
         assert!(ok);
         assert_eq!(p, real);
 
         // 3) 无设置 → 探测链候选命中（extra 注入，隔离真实环境）
         let (p, ok) = effective_zcode_path_in(
             &paths,
-            &[r"C:/nope/ZCode.exe".into()],
+            &[r"C:\nope\ZCode.exe".into()],
             &[real.clone()],
         );
         assert!(ok);
         assert_eq!(p, real);
 
         // 4) 都没有 → 第一个候选 + false（不静默返回空）
-        let (p, ok) = effective_zcode_path_in(&paths, &[r"C:/nope/ZCode.exe".into()], &[]);
+        let (p, ok) = effective_zcode_path_in(&paths, &[r"C:\nope\ZCode.exe".into()], &[]);
         assert!(!ok);
-        assert_eq!(p, r"C:/nope/ZCode.exe");
+        assert_eq!(p, r"C:\nope\ZCode.exe");
 
         // 5) 探测链候选不存在时不得误判可用
         let (_, ok) =
-            effective_zcode_path_in(&paths, &[r"C:/nope/ZCode.exe".into()], &[r"D:/ghost/ZCode.exe".into()]);
+            effective_zcode_path_in(&paths, &[r"C:\nope\ZCode.exe".into()], &[r"D:\ghost\ZCode.exe".into()]);
         assert!(!ok);
 
         let _ = fs::remove_dir_all(&tmp);
