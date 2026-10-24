@@ -127,6 +127,7 @@ export const zh = {
   "btn.addAccountTitle": "OAuth 登录新账号入库，不影响当前登录",
   "btn.killZcode": "关 ZCode",
   "btn.launchZcode": "启动 ZCode",
+  "btn.launchZcodeTitle": "启动本机 ZCode（未检测到程序时点击可查看处理提示）",
   "btn.switch": "切换",
   "btn.current": "当前",
   "btn.inUse": "使用中",

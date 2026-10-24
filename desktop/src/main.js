@@ -921,7 +921,7 @@ function render() {
       <button class="btn-ghost has-ic" click="actions.addAccount()" title="${t("btn.addAccountTitle")}">${ic("userPlus", 16)} ${t("btn.addAccount")}</button>
       ${s.zcode_running
         ? `<button class="btn-ghost has-ic" click="actions.askKill()" title="${t("btn.killZcode")}">${ic("power", 16)} ${t("btn.killZcode")}</button>`
-        : `<button class="btn-ghost has-ic" click="actions.launch()" ${s.zcode_path_ok ? "" : "disabled"}>${ic("play", 14)} ${t("btn.launchZcode")}</button>`}
+        : `<button class="btn-ghost has-ic" click="actions.launch()" title="${t("btn.launchZcodeTitle")}">${ic("play", 14)} ${t("btn.launchZcode")}</button>`}
       <span class="tb-spacer"></span>
       <button class="btn-ghost tb-gear has-ic" click="actions.openSettings()" aria-label="${t("common.settings")}" title="${t("common.settings")}">${ic("sliders", 16)}</button>
     </section>

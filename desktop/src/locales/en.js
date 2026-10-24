@@ -127,6 +127,7 @@ export const en = {
   "btn.addAccountTitle": "Add a new account via OAuth without touching your current login",
   "btn.killZcode": "Quit",
   "btn.launchZcode": "Launch ZCode",
+  "btn.launchZcodeTitle": "Launch local ZCode (if not detected, click for hints)",
   "btn.switch": "Switch",
   "btn.current": "Current",
   "btn.inUse": "In use",
