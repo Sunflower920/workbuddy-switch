@@ -320,7 +320,7 @@ pub async fn ds_switch(name: String) -> Result<Value, String> {
 /// 浏览器窗口留给 Detached 子进程，人登完自己关；关掉之后才能保存快照
 /// （保存会被锁检测挡住，这是故意的：正被浏览器持有的 Cookie 复制出来是坏的）。
 #[tauri::command]
-pub async fn ds_login() -> Result<Value, String> {
+pub async fn ds_login(fresh: bool) -> Result<Value, String> {
     let (dir, node) = resolved();
     let Some(dir) = dir else { return Err(tr("ds.err.noDir")) };
 
@@ -340,14 +340,14 @@ pub async fn ds_login() -> Result<Value, String> {
         ));
     }
 
-    let login = run_cli_async(
-        dir,
-        node,
-        GATEWAY_CLI,
-        vec!["login".into(), "--json".into()],
-        QUICK_TIMEOUT_SECS,
-    )
-    .await?;
+    // `--fresh` = 先存档再清空登录态。不清空的话 profile 里还留着旧账号的
+    // Cookie，打开的页面是那个已登录的会话而不是登录表单（`--login` 只是
+    // goto(targetUrl)），窗口对“加另一个号”毫无用处。
+    let mut args = vec!["login".into(), "--json".into()];
+    if fresh {
+        args.push("--fresh".into());
+    }
+    let login = run_cli_async(dir, node, GATEWAY_CLI, args, QUICK_TIMEOUT_SECS).await?;
 
     Ok(json!({ "stopped": stopped, "login": login }))
 }

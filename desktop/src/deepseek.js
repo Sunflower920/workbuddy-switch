@@ -256,7 +256,7 @@ export const dsActions = {
   },
 
   async login() {
-    const r = await call("login", () => invoke("ds_login"));
+    const r = await call("login", () => invoke("ds_login", { fresh: true }));
     if (!r) return;
     loginOpened = true;
     toast(t("ds.toastLogin"), "ok", t("ds.toastLoginDetail"));
