@@ -402,6 +402,8 @@ export const en = {
   "ds.gw.stopped": "Gateway stopped · port {port}",
   "ds.noProfile": "No browser profile yet (start the gateway once first)",
   "ds.unknownAccount": "unknown account",
+  "ds.signedIn": "signed in",
+  "ds.notSignedIn": "not signed in",
   "ds.signedInAs": "Signed in as: {who}",
   "ds.entries": "login files {n}/{total}",
   "ds.working": "{what}…",

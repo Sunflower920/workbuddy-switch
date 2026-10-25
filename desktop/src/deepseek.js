@@ -92,18 +92,29 @@ function gatewayLine() {
   </div>`;
 }
 
-/** 当前登录是谁（六文件在位情况 + 打码手机号）。 */
+/** 当前登录是谁（六文件在位情况 + 打码手机号）。
+ *
+ * 「未知账号」只是说档案里没有明文手机号，不等于没登录 —— 这两件事分开展示，
+ * 否则一个正常登录的号会显示得像失败（2026-10-26 连续三次保存被误判为此）。
+ */
 function currentLine() {
   const c = state?.current || {};
   if (c.error) return `<div class="wb-note err">${esc(c.error)}</div>`;
   if (c.exists === false) return `<div class="ds-line">${esc(t("ds.noProfile"))}</div>`;
   const who = (c.phones || []).join(", ") || t("ds.unknownAccount");
-  return `<div class="ds-line">${esc(t("ds.signedInAs", { who }))}
+  const badge = c.loggedIn
+    ? `<span class="tag-use">${esc(t("ds.signedIn"))}</span>`
+    : `<span class="tag-relogin">${esc(t("ds.notSignedIn"))}</span>`;
+  return `<div class="ds-line">${esc(t("ds.signedInAs", { who }))} ${badge}
     <span class="count">${esc(t("ds.entries", { n: c.entriesPresent ?? 0, total: c.entriesExpected ?? 6 }))}</span></div>`;
 }
 
 function rowHtml(a) {
   const who = (a.phones || []).join(", ") || t("ds.unknownAccount");
+  // 登没登录和能不能报出手机号是两件事：没有明文手机号也可能完全可用。
+  const state_ = a.loggedIn
+    ? `<span class="tag-use">${esc(t("ds.signedIn"))}</span>`
+    : `<span class="tag-relogin">${esc(t("ds.notSignedIn"))}</span>`;
   const when = a.savedAt ? String(a.savedAt).slice(0, 16).replace("T", " ") : "?";
   // CLI 给的是字节数（快照是六文件，通常几 MB），这里换算成 MB 显示。
   const size = Number.isFinite(a.size) ? `${(a.size / 1024 / 1024).toFixed(1)} MB` : "";
@@ -112,7 +123,7 @@ function rowHtml(a) {
     <div class="row-top">
       <span class="notch" style="background:var(--notch-3)"></span>
       <div class="row-main">
-        <div class="row-name">${esc(a.name)}</div>
+        <div class="row-name">${esc(a.name)} ${state_}</div>
         <div class="row-meta">${esc(who)}${size ? " · " + esc(size) : ""} · ${esc(when)}</div>
       </div>
       <div class="row-actions">

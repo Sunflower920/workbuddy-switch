@@ -402,6 +402,8 @@ export const zh = {
   "ds.gw.stopped": "网关未运行 · 端口 {port}",
   "ds.noProfile": "还没有浏览器 profile（先把网关启动一次）",
   "ds.unknownAccount": "未知账号",
+  "ds.signedIn": "已登录",
+  "ds.notSignedIn": "未登录",
   "ds.signedInAs": "当前登录：{who}",
   "ds.entries": "登录文件 {n}/{total}",
   "ds.working": "正在{what}…",
