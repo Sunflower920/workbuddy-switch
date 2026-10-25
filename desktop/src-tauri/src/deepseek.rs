@@ -291,17 +291,24 @@ pub async fn ds_capture(name: String) -> Result<Value, String> {
     .await;
 
     // 无论存档成败都把网关恢复到点之前的状态：用户在别处等着的会话
-    // 不该因为这次存档而一直停着。
-    if was_running {
-        let _ = run_cli_async(
-            dir,
-            node,
-            GATEWAY_CLI,
-            vec!["start".into(), "--json".into()],
-            SWITCH_TIMEOUT_SECS,
+    // 不该因为这次存档而一直停着。恢复失败必须说出来 —— stop-gateway.ps1
+    // 会留下 data/stop-flag 压住看门狗 30 分钟，也就是说"没起来"这件事
+    // 不会自己好，用户得知道要去点启动。
+    let restart = if was_running {
+        Some(
+            run_cli_async(
+                dir,
+                node,
+                GATEWAY_CLI,
+                vec!["start".into(), "--json".into()],
+                SWITCH_TIMEOUT_SECS,
+            )
+            .await
+            .unwrap_or_else(|e| json!({ "error": e })),
         )
-        .await;
-    }
+    } else {
+        None
+    };
 
     let saved = saved.map_err(|e| {
         if e.contains("still owned by a running browser") {
@@ -311,7 +318,7 @@ pub async fn ds_capture(name: String) -> Result<Value, String> {
         }
     })?;
 
-    Ok(json!({ "saved": saved, "restarted": was_running }))
+    Ok(json!({ "saved": saved, "restarted": was_running, "restart": restart }))
 }
 
 /// 切号：停网关 → 换登录态 → 起网关。

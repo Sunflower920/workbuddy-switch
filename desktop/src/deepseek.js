@@ -296,8 +296,12 @@ export const dsActions = {
         // 快照成功即说明浏览器已经放手（否则会被锁检测挡下），提示可以收了。
         loginOpened = false;
         // 网关是被这次存档临时停掉的，存完自动恢复 —— 要说出来，
-        // 否则用户会以为网关莫名断了。
-        toast(t("ds.toastSaved", { name }), "ok", r?.restarted ? t("ds.savedRestarted") : "");
+        // 否则用户会以为网关莫名断了。恢复失败更要说：stop-flag 会压住
+        // 看门狗 30 分钟，它不会自己起来。
+        const restartFailed = Boolean(r?.restart?.error) || r?.restart?.started === false;
+        if (!r?.restarted) toast(t("ds.toastSaved", { name }), "ok");
+        else if (restartFailed) toast(t("ds.savedButGatewayDown"), "warn", String(r?.restart?.error ?? ""));
+        else toast(t("ds.toastSaved", { name }), "ok", t("ds.savedRestarted"));
       });
     } finally {
       window.__dsCaptureSaving = false;
