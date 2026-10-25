@@ -416,6 +416,7 @@ export const en = {
   "ds.confirmDropTitle": "Remove this account?",
   "ds.confirmDropDesc": "\"{name}\" is moved to .recycled, never deleted - but its login is then unreachable from here.",
   "ds.toastSaved": "Saved as \"{name}\"",
+  "ds.savedRestarted": "The gateway was paused for the snapshot and has been restarted",
   "ds.toastSwitched": "Switched to \"{name}\"",
   "ds.swapOkStartFailed": "The login was swapped, but the gateway did not come up (use \"Start gateway\")",
   "ds.alreadyRunning": "The gateway was already running; restart it for the new login to take effect",

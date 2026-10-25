@@ -243,6 +243,12 @@ pub async fn ds_state() -> Result<Value, String> {
 }
 
 /// 把当前登录存成账号。名字交给 CLI 校验（它会变成目录名）。
+///
+/// 存档要独占 profile：浏览器还开着时，复制出来的 Cookie 数据库是坏的
+/// （会"保存成功"却登不进去），所以 CLI 会拒绝。这个拒绝是对的，但把
+/// "你自己先去点停止网关，存完再点启动"留给用户是没必要的 —— 网关照停、
+/// 存完照起，恢复到点之前的原样。只有一种情况仍需人动手：另有登录窗口
+/// 开着（那是人手开的窗口，不该由这里关掉），此时给出明确的说法。
 #[tauri::command]
 pub async fn ds_capture(name: String) -> Result<Value, String> {
     let name = name.trim().to_string();
@@ -251,14 +257,61 @@ pub async fn ds_capture(name: String) -> Result<Value, String> {
     }
     let (dir, node) = resolved();
     let Some(dir) = dir else { return Err(tr("ds.err.noDir")) };
-    run_cli_async(
-        dir,
-        node,
+
+    let status = run_cli_async(
+        dir.clone(),
+        node.clone(),
+        GATEWAY_CLI,
+        vec!["status".into(), "--json".into()],
+        QUICK_TIMEOUT_SECS,
+    )
+    .await
+    .unwrap_or_else(|_| json!({}));
+    let was_running = status.get("listening").and_then(Value::as_bool).unwrap_or(false);
+
+    if was_running {
+        run_cli_async(
+            dir.clone(),
+            node.clone(),
+            GATEWAY_CLI,
+            vec!["stop".into(), "--json".into()],
+            SWITCH_TIMEOUT_SECS,
+        )
+        .await
+        .map_err(|e| trf("ds.err.stopFailed", &[("e", &e)]))?;
+    }
+
+    let saved = run_cli_async(
+        dir.clone(),
+        node.clone(),
         ACCOUNT_CLI,
         vec!["save".into(), name, "--json".into()],
         QUICK_TIMEOUT_SECS,
     )
-    .await
+    .await;
+
+    // 无论存档成败都把网关恢复到点之前的状态：用户在别处等着的会话
+    // 不该因为这次存档而一直停着。
+    if was_running {
+        let _ = run_cli_async(
+            dir,
+            node,
+            GATEWAY_CLI,
+            vec!["start".into(), "--json".into()],
+            SWITCH_TIMEOUT_SECS,
+        )
+        .await;
+    }
+
+    let saved = saved.map_err(|e| {
+        if e.contains("still owned by a running browser") {
+            tr("ds.err.profileBusy")
+        } else {
+            e
+        }
+    })?;
+
+    Ok(json!({ "saved": saved, "restarted": was_running }))
 }
 
 /// 切号：停网关 → 换登录态 → 起网关。

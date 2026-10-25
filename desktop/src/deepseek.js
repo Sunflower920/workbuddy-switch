@@ -292,10 +292,12 @@ export const dsActions = {
     window.__dsCaptureSaving = true;
     try {
       await call("capture", async () => {
-        await invoke("ds_capture", { name });
+        const r = await invoke("ds_capture", { name });
         // 快照成功即说明浏览器已经放手（否则会被锁检测挡下），提示可以收了。
         loginOpened = false;
-        toast(t("ds.toastSaved", { name }), "ok");
+        // 网关是被这次存档临时停掉的，存完自动恢复 —— 要说出来，
+        // 否则用户会以为网关莫名断了。
+        toast(t("ds.toastSaved", { name }), "ok", r?.restarted ? t("ds.savedRestarted") : "");
       });
     } finally {
       window.__dsCaptureSaving = false;

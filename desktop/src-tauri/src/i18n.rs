@@ -232,6 +232,8 @@ const ZH: &[(&str, &str)] = &[
     ("ds.err.badAction", "网关动作只能是 status / start / stop / restart"),
     ("ds.err.stopFailed", "停网关失败，切号已中止（避免登录态被正在退出的浏览器回写覆盖）：{e}"),
     ("ds.setup.hint", "没找到网关仓库（要含 tools/account-pool.mjs）。请指定它的目录。"),
+    ("ds.err.profileBusy",
+     "还有浏览器正在占用登录目录 —— 多半是「登录新账号」开出的窗口没关。请关掉那个窗口再保存。\n（不要在浏览器还开着时强行存档：复制出来的 Cookie 会损坏，存了也登不进去。）"),
 ];
 
 const EN: &[(&str, &str)] = &[
@@ -407,6 +409,8 @@ const EN: &[(&str, &str)] = &[
     ("ds.err.badAction", "Gateway action must be status / start / stop / restart"),
     ("ds.err.stopFailed", "Stopping the gateway failed, so the switch was aborted (a browser that is still exiting would write its own login back over the new one): {e}"),
     ("ds.setup.hint", "No gateway repository found (it must contain tools/account-pool.mjs). Please pick its directory."),
+    ("ds.err.profileBusy",
+     "A browser is still holding the login directory - most likely the window opened by \"Sign in a new account\" is still open. Close it, then save.\n(Do not force a save while the browser is running: the copied cookie database is torn and cannot log in.)"),
 ];
 
 fn table_for(lang: Lang) -> &'static [(&'static str, &'static str)] {

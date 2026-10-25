@@ -416,6 +416,7 @@ export const zh = {
   "ds.confirmDropTitle": "移除这个账号？",
   "ds.confirmDropDesc": "「{name}」会被移到回收目录（.recycled），不会真删 —— 但它的登录态就取不回来了。",
   "ds.toastSaved": "已保存为「{name}」",
+  "ds.savedRestarted": "存档时暂停了网关，已自动恢复运行",
   "ds.toastSwitched": "已切到「{name}」",
   "ds.swapOkStartFailed": "登录态已换好，但网关没起来（可手动点「启动网关」）",
   "ds.alreadyRunning": "网关本来就在跑，登录态已换 —— 需重启网关才生效",
