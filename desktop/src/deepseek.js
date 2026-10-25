@@ -352,7 +352,12 @@ export const dsActions = {
     const r = await call("gateway", () => invoke("ds_gateway", { action }));
     if (!r) return;
     if (action === "stop") toast(t("ds.toastStopped"), "ok");
-    if (action === "start") toast(r?.started ? t("ds.toastStarted") : t("ds.startFailed"), r?.started ? "ok" : "warn");
+    if (action === "start") {
+      // 「已经在跑」不是失败：网关本来就在服务，说成"没起来"会让人以为坏了。
+      if (r?.started) toast(t("ds.toastStarted"), "ok");
+      else if (r?.alreadyRunning) toast(t("ds.gwAlreadyRunning"), "ok");
+      else toast(t("ds.startFailed"), "warn");
+    }
     if (action === "restart") toast(t("ds.toastRestarted"), "ok");
     await refresh();
   },

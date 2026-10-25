@@ -422,6 +422,7 @@ export const zh = {
   "ds.toastDropped": "已移除「{name}」",
   "ds.toastDroppedDetail": "只是挪到 .recycled，需要时可从那里搬回",
   "ds.toastStopped": "网关已停止",
+  "ds.gwAlreadyRunning": "网关本来就在运行，无需启动",
   "ds.toastStarted": "网关已启动",
   "ds.startFailed": "网关没起来（看提示或手动启动）",
   "ds.toastRestarted": "网关已重启",

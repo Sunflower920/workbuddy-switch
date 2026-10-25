@@ -1058,7 +1058,11 @@ async function sweepTick() {
   try {
     // 让另两个视图能在数据变化后请求重渲染（避免模块互相 import 成环）
     wb.bindRerender(() => { if (view === "workbuddy" && !uiLocked()) render(); });
-    ds.bindRerender(() => { if (view === "deepseek" && !uiLocked()) render(); });
+    // 这里的重渲染全部由用户动作触发（展开输入框、切号、网关启停），必须真的画出来。
+    // 不能再加 !uiLocked()：输入框开着时 uiLocked() 为真，而"展开输入框"这个动作
+    // 恰恰是先把 capturing 置真再请求重渲染 —— 加锁就把自己挡在门外，点了没反应。
+    // uiLocked() 只用来拦住后台定时器的重渲染（那才是会吞掉输入焦点的那个）。
+    ds.bindRerender(() => { if (view === "deepseek") render(); });
 
     appVer = await invoke("app_version").catch(() => "");
     await refresh();

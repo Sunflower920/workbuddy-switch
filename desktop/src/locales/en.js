@@ -422,6 +422,7 @@ export const en = {
   "ds.toastDropped": "Removed \"{name}\"",
   "ds.toastDroppedDetail": "Moved to .recycled only - you can move it back by hand",
   "ds.toastStopped": "Gateway stopped",
+  "ds.gwAlreadyRunning": "The gateway is already running",
   "ds.toastStarted": "Gateway started",
   "ds.startFailed": "The gateway did not come up (see the message, or start it by hand)",
   "ds.toastRestarted": "Gateway restarted",
