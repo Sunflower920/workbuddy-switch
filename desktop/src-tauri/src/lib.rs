@@ -1202,6 +1202,7 @@ pub fn run() {
             deepseek::ds_capture,
             deepseek::ds_switch,
             deepseek::ds_drop,
+            deepseek::ds_rename,
             deepseek::ds_login,
             deepseek::ds_gateway,
             deepseek::ds_pick_gateway_dir,

@@ -412,6 +412,27 @@ pub async fn ds_login(fresh: bool) -> Result<Value, String> {
     Ok(json!({ "stopped": stopped, "login": login }))
 }
 
+/// 给存档改名。自动生成名（`auto-logout-<时间戳>`）只说"什么时候存的"、
+/// 不说"是谁"，于是换号时只能靠猜 —— 改名让每一行都能标成认得出的人。
+#[tauri::command]
+pub async fn ds_rename(from: String, to: String) -> Result<Value, String> {
+    let (dir, node) = resolved();
+    let Some(dir) = dir else { return Err(tr("ds.err.noDir")) };
+    let from = from.trim().to_string();
+    let to = to.trim().to_string();
+    if from.is_empty() || to.is_empty() {
+        return Err(tr("ds.err.nameEmpty"));
+    }
+    run_cli_async(
+        dir,
+        node,
+        ACCOUNT_CLI,
+        vec!["rename".into(), from, to, "--json".into()],
+        QUICK_TIMEOUT_SECS,
+    )
+    .await
+}
+
 /// 移除账号（CLI 只挪到 .recycled，不真删）。
 #[tauri::command]
 pub async fn ds_drop(name: String) -> Result<Value, String> {

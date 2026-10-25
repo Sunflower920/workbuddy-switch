@@ -23,6 +23,8 @@ let busy = "";
 let capturing = false;
 /** 登录窗口是否已开出去（用于显示「登完关窗口再保存」的提示）。 */
 let loginOpened = false;
+/** 正在改名的存档名（null 表示没有）。 */
+let renamingName = null;
 /** 最近一次错误信息（null 表示无）。 */
 let failure = null;
 
@@ -111,10 +113,25 @@ function currentLine() {
 
 function rowHtml(a) {
   const who = (a.phones || []).join(", ") || t("ds.unknownAccount");
+  const renaming = a.name === renamingName;
+  if (renaming) {
+    return `
+    <div class="row" data-name="${esc(a.name)}">
+      <div class="row-top">
+        <span class="notch" style="background:var(--notch-3)"></span>
+        <div class="row-main">
+          <input class="rename-input" value="${esc(a.name)}" maxlength="48"
+            keydown="onDsRenameKey(event,'${esc(a.name)}')" blur="dsActions.deferCancelRename()">
+          <div class="row-meta">${esc(who)}</div>
+        </div>
+      </div>
+    </div>`;
+  }
   // 登没登录和能不能报出手机号是两件事：没有明文手机号也可能完全可用。
   const state_ = a.loggedIn
     ? `<span class="tag-use">${esc(t("ds.signedIn"))}</span>`
     : `<span class="tag-relogin">${esc(t("ds.notSignedIn"))}</span>`;
+  const using = a.inUse ? `<span class="tag-multi">${esc(t("ds.inUse"))}</span>` : "";
   const when = a.savedAt ? String(a.savedAt).slice(0, 16).replace("T", " ") : "?";
   // CLI 给的是字节数（快照是六文件，通常几 MB），这里换算成 MB 显示。
   const size = Number.isFinite(a.size) ? `${(a.size / 1024 / 1024).toFixed(1)} MB` : "";
@@ -123,10 +140,12 @@ function rowHtml(a) {
     <div class="row-top">
       <span class="notch" style="background:var(--notch-3)"></span>
       <div class="row-main">
-        <div class="row-name">${esc(a.name)} ${state_}</div>
+        <div class="row-name">${esc(a.name)} ${state_}${using}</div>
         <div class="row-meta">${esc(who)}${size ? " · " + esc(size) : ""} · ${esc(when)}</div>
       </div>
       <div class="row-actions">
+        <button class="icon-btn" title="${esc(t("ds.rename"))}" aria-label="${esc(t("ds.rename"))}"
+          click="dsActions.rename('${esc(a.name)}')" ${busy ? "disabled" : ""}>${ic("pen", 16)}</button>
         <button class="icon-btn danger" title="${esc(t("ds.drop"))}" aria-label="${esc(t("ds.drop"))}"
           click="dsActions.askDrop('${esc(a.name)}')" ${busy ? "disabled" : ""}>${ic("x", 16)}</button>
         <button class="btn-switch has-ic" click="dsActions.askSwitch('${esc(a.name)}')" ${busy ? "disabled" : ""}>
@@ -347,6 +366,44 @@ export const dsActions = {
     await refresh();
   },
 
+  /** 改名只动目录名，六个登录文件一个字节都不碰 —— 随时能改回来。 */
+  rename(name) {
+    renamingName = name;
+    rerender();
+    document.querySelector(`.row[data-name="${CSS.escape(name)}"] .rename-input`)?.focus();
+  },
+
+  deferCancelRename() {
+    clearTimeout(window.__dsRenameBlurTimer);
+    window.__dsRenameBlurTimer = setTimeout(() => {
+      if (renamingName !== null && !window.__dsRenameSaving) dsActions.cancelRename();
+    }, 180);
+  },
+
+  cancelRename() {
+    renamingName = null;
+    rerender();
+  },
+
+  async doRename(name) {
+    const input = document.querySelector(`.row[data-name="${CSS.escape(name)}"] .rename-input`);
+    const next = (input?.value || "").trim();
+    if (!next || next === name) {
+      renamingName = null;
+      rerender();
+      return;
+    }
+    window.__dsRenameSaving = true;
+    clearTimeout(window.__dsRenameBlurTimer);
+    try {
+      await call("rename", () => invoke("ds_rename", { from: name, to: next }));
+    } finally {
+      window.__dsRenameSaving = false;
+    }
+    renamingName = null;
+    await refresh();
+  },
+
   askDrop(name) {
     openConfirmModal({
       title: t("ds.confirmDropTitle"),
@@ -405,5 +462,15 @@ export function onDsCaptureKey(event) {
   }
 }
 
+export function onDsRenameKey(event, name) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    dsActions.doRename(name);
+  } else if (event.key === "Escape") {
+    dsActions.cancelRename();
+  }
+}
+
 window.dsActions = dsActions;
 window.onDsCaptureKey = onDsCaptureKey;
+window.onDsRenameKey = onDsRenameKey;
