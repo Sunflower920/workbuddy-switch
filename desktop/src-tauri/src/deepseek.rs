@@ -313,6 +313,45 @@ pub async fn ds_switch(name: String) -> Result<Value, String> {
     Ok(json!({ "name": name, "stopped": stopped, "swapped": swapped, "started": started }))
 }
 
+/// 登录一个新账号：停网关 → 打开网关自己的登录模式（`--login`）。
+///
+/// 先停是硬约束：登录窗口要用同一个 profile，而 Chromium 独占它 —— 网关还
+/// 在跑时开出来的窗口会直接死在锁上（`00登录.bat` 也是这条规矩）。
+/// 浏览器窗口留给 Detached 子进程，人登完自己关；关掉之后才能保存快照
+/// （保存会被锁检测挡住，这是故意的：正被浏览器持有的 Cookie 复制出来是坏的）。
+#[tauri::command]
+pub async fn ds_login() -> Result<Value, String> {
+    let (dir, node) = resolved();
+    let Some(dir) = dir else { return Err(tr("ds.err.noDir")) };
+
+    let stopped = run_cli_async(
+        dir.clone(),
+        node.clone(),
+        GATEWAY_CLI,
+        vec!["stop".into(), "--json".into()],
+        QUICK_TIMEOUT_SECS,
+    )
+    .await
+    .unwrap_or_else(|e| json!({ "error": e }));
+    if stopped.get("error").is_some() {
+        return Err(trf(
+            "ds.err.stopFailed",
+            &[("e", stopped.get("error").and_then(Value::as_str).unwrap_or(""))],
+        ));
+    }
+
+    let login = run_cli_async(
+        dir,
+        node,
+        GATEWAY_CLI,
+        vec!["login".into(), "--json".into()],
+        QUICK_TIMEOUT_SECS,
+    )
+    .await?;
+
+    Ok(json!({ "stopped": stopped, "login": login }))
+}
+
 /// 移除账号（CLI 只挪到 .recycled，不真删）。
 #[tauri::command]
 pub async fn ds_drop(name: String) -> Result<Value, String> {

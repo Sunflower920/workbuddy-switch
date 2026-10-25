@@ -21,6 +21,8 @@ let state = null;
 let busy = "";
 /** 是否展开「保存当前账号」的输入框。 */
 let capturing = false;
+/** 登录窗口是否已开出去（用于显示「登完关窗口再保存」的提示）。 */
+let loginOpened = false;
 /** 最近一次错误信息（null 表示无）。 */
 let failure = null;
 
@@ -176,7 +178,8 @@ export function viewHtml(tabsHtml) {
 
   const toolbar = `
   <section class="toolbar">
-    ${btn(t("ds.saveLogin"), "capture", "dsActions.capture()", { disabled: !!busy, kind: "primary" })}
+    ${btn(t("ds.login"), "userPlus", "dsActions.askLogin()", { disabled: !!busy, kind: "primary" })}
+    ${btn(t("ds.saveLogin"), "capture", "dsActions.capture()", { disabled: !!busy })}
     <span class="tb-spacer"></span>
     ${btn(t("ds.gwStart"), "play", "dsActions.gateway('start')", { disabled: !!busy })}
     ${btn(t("ds.gwStop"), "power", "dsActions.gateway('stop')", { disabled: !!busy })}
@@ -189,6 +192,7 @@ export function viewHtml(tabsHtml) {
     <div class="wb-wrap">
       ${busyBar}
       ${failure ? `<div class="wb-note err">${esc(failure)}</div>` : ""}
+      ${loginOpened ? `<div class="wb-note">${esc(t("ds.loginHint"))}</div>` : ""}
       ${toolbar}
       ${captureBox}
       ${gatewayLine()}
@@ -210,6 +214,7 @@ function busyLabel(key) {
     capture: t("ds.opCapture"),
     drop: t("ds.opDrop"),
     gateway: t("ds.opGateway"),
+    login: t("ds.opLogin"),
     refresh: t("ds.opRefresh"),
   };
   return map[key] || key;
@@ -218,6 +223,7 @@ function busyLabel(key) {
 /** 离开视图时的清理：收起输入框，避免下次进来还是展开的。 */
 export function onLeave() {
   capturing = false;
+  loginOpened = false;
 }
 
 // ---------------------------------------------------------------- 交互
@@ -230,6 +236,26 @@ export const dsActions = {
   toggleTheme() {
     flipTheme();
     rerender();
+  },
+
+  /** 登录要先停网关（同一个 profile 被 Chromium 独占），所以要人确认一次。 */
+  askLogin() {
+    openConfirmModal({
+      kind: "warn",
+      icon: "userPlus",
+      title: t("ds.loginConfirmTitle"),
+      desc: t("ds.loginConfirmDesc"),
+      yesLabel: t("ds.login"),
+      onYes: () => dsActions.login(),
+    });
+  },
+
+  async login() {
+    const r = await call("login", () => invoke("ds_login"));
+    if (!r) return;
+    loginOpened = true;
+    toast(t("ds.toastLogin"), "ok", t("ds.toastLoginDetail"));
+    await refresh();
   },
 
   capture() {
@@ -251,6 +277,8 @@ export const dsActions = {
     window.__dsCaptureSaving = true;
     await call("capture", async () => {
       await invoke("ds_capture", { name });
+      // 快照成功即说明浏览器已经放手（否则会被锁检测挡下），提示可以收了。
+      loginOpened = false;
       toast(t("ds.toastSaved", { name }), "ok");
     });
     window.__dsCaptureSaving = false;
