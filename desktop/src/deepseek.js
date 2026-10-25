@@ -35,9 +35,12 @@ export function bindRerender(fn) {
   rerender = typeof fn === "function" ? fn : () => {};
 }
 
-/** 输入框是否开着 —— main.js 的 uiLocked() 据此暂停后台重渲染。 */
+/** 输入框是否开着 —— main.js 的 uiLocked() 据此暂停后台重渲染。
+ *
+ * 两个行内输入（保存取名、账号改名）都要报上，漏一个就会被后台 5 秒的
+ * 重渲染把正在打的字冲掉 —— 保存框那条 bug 就是这个机理。 */
 export function isCaptureActive() {
-  return capturing;
+  return capturing || renamingName !== null;
 }
 
 // ---------------------------------------------------------------- 调用封装
