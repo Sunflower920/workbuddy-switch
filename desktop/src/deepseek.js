@@ -33,6 +33,11 @@ export function bindRerender(fn) {
   rerender = typeof fn === "function" ? fn : () => {};
 }
 
+/** 输入框是否开着 —— main.js 的 uiLocked() 据此暂停后台重渲染。 */
+export function isCaptureActive() {
+  return capturing;
+}
+
 // ---------------------------------------------------------------- 调用封装
 
 /** 统一处理忙碌与错误：失败弹 toast 并返回 undefined（不抛异常）。 */
@@ -259,29 +264,42 @@ export const dsActions = {
   },
 
   capture() {
+    // 上一次 blur 挂着的延迟取消还在排队的话，先撤掉，否则刚展开就被收起。
+    clearTimeout(window.__dsCaptureBlurTimer);
     capturing = true;
     rerender();
     document.getElementById("ds-capture-input")?.focus();
   },
 
+  /** 失焦不立即收起：点「保存」时 blur 先于 click 到达，立即收起会让
+   * click 读到一个已经不存在的输入框（与 ZCode 重命名的 defer 模式一致）。 */
   cancelCapture() {
     if (window.__dsCaptureSaving) return;
-    capturing = false;
-    rerender();
+    clearTimeout(window.__dsCaptureBlurTimer);
+    window.__dsCaptureBlurTimer = setTimeout(() => {
+      if (capturing && !window.__dsCaptureSaving) {
+        capturing = false;
+        rerender();
+      }
+    }, 180);
   },
 
   async doCapture() {
+    clearTimeout(window.__dsCaptureBlurTimer);
     const input = document.getElementById("ds-capture-input");
     const name = (input?.value || "").trim();
     if (!name) return;
     window.__dsCaptureSaving = true;
-    await call("capture", async () => {
-      await invoke("ds_capture", { name });
-      // 快照成功即说明浏览器已经放手（否则会被锁检测挡下），提示可以收了。
-      loginOpened = false;
-      toast(t("ds.toastSaved", { name }), "ok");
-    });
-    window.__dsCaptureSaving = false;
+    try {
+      await call("capture", async () => {
+        await invoke("ds_capture", { name });
+        // 快照成功即说明浏览器已经放手（否则会被锁检测挡下），提示可以收了。
+        loginOpened = false;
+        toast(t("ds.toastSaved", { name }), "ok");
+      });
+    } finally {
+      window.__dsCaptureSaving = false;
+    }
     capturing = false;
     await refresh();
   },

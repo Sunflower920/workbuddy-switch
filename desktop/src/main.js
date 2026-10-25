@@ -64,7 +64,9 @@ async function refresh() {
 }
 
 function uiLocked() {
-  return renaming !== null;
+  // DeepSeek 页的「保存当前登录」输入框开着时也不能重渲染：后台的 5 秒轮询
+  // 会把整个视图重建，焦点和已输入的文字跟着被吞掉（与 renaming 同理）。
+  return renaming !== null || ds.isCaptureActive();
 }
 
 async function guard(fn) {
