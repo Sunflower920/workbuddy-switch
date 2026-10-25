@@ -219,6 +219,19 @@ const ZH: &[(&str, &str)] = &[
     ("cli.read_fail", "读取失败：{e}"),
     ("cli.json_fail", "JSON 解析失败：{e}"),
     ("err.lang.unknown", "未知语言：{lang}（支持 zh / en）"),
+
+    // ---- DeepSeek 网关 ----
+    ("ds.err.spawn", "无法启动 node（{e}）。请在面板里指定 node.exe 的路径。"),
+    ("ds.err.noOutput", "命令行没有返回内容（退出码 {code}）"),
+    ("ds.err.badJson", "命令行返回的不是 JSON：{e}"),
+    ("ds.err.unknown", "命令行失败，未给出原因"),
+    ("ds.err.join", "命令行线程异常退出"),
+    ("ds.err.timeout", "命令行超过 {s} 秒没有返回（网关启动慢，也可能是真的卡住了）"),
+    ("ds.err.noDir", "还没找到网关目录。请先在面板里指定它。"),
+    ("ds.err.nameEmpty", "账号名不能为空"),
+    ("ds.err.badAction", "网关动作只能是 status / start / stop / restart"),
+    ("ds.err.stopFailed", "停网关失败，切号已中止（避免登录态被正在退出的浏览器回写覆盖）：{e}"),
+    ("ds.setup.hint", "没找到网关仓库（要含 tools/account-pool.mjs）。请指定它的目录。"),
 ];
 
 const EN: &[(&str, &str)] = &[
@@ -381,6 +394,19 @@ const EN: &[(&str, &str)] = &[
     ("cli.read_fail", "Read failed: {e}"),
     ("cli.json_fail", "JSON parse failed: {e}"),
     ("err.lang.unknown", "Unknown language: {lang} (supported: zh / en)"),
+
+    // ---- DeepSeek 网关 ----
+    ("ds.err.spawn", "Cannot start node ({e}). Please set the path to node.exe in the panel."),
+    ("ds.err.noOutput", "The command printed nothing (exit code {code})"),
+    ("ds.err.badJson", "The command did not return JSON: {e}"),
+    ("ds.err.unknown", "The command failed without giving a reason"),
+    ("ds.err.join", "The command thread exited abnormally"),
+    ("ds.err.timeout", "The command did not answer within {s}s (the gateway is slow to start - or it is stuck)"),
+    ("ds.err.noDir", "No gateway directory yet. Please set one in the panel."),
+    ("ds.err.nameEmpty", "Account name cannot be empty"),
+    ("ds.err.badAction", "Gateway action must be status / start / stop / restart"),
+    ("ds.err.stopFailed", "Stopping the gateway failed, so the switch was aborted (a browser that is still exiting would write its own login back over the new one): {e}"),
+    ("ds.setup.hint", "No gateway repository found (it must contain tools/account-pool.mjs). Please pick its directory."),
 ];
 
 fn table_for(lang: Lang) -> &'static [(&'static str, &'static str)] {

@@ -4,6 +4,7 @@ import { esc, toast, openPwModal, openConfirmModal, openProviderModal, installDe
 import { ic } from "./icons.js";
 import { init, t, has, lang, localeTag, stripErr } from "./i18n.js";
 import * as wb from "./workbuddy.js";
+import * as ds from "./deepseek.js";
 
 const $app = document.getElementById("app");
 let state = null;
@@ -13,7 +14,7 @@ let appVer = "";
 let acctQuota = {};
 let claimable = {};
 let claimAllRunning = false;
-/** 当前视图：zcode | workbuddy。两侧后端相互独立，切换只影响渲染。 */
+/** 当前视图：zcode | workbuddy | deepseek。三个后端相互独立，切换只影响渲染。 */
 let view = "zcode";
 const REFRESH_CLAIM_COOLDOWN_MS = 60_000;
 let refreshClaim = { running: false, done: 0, total: 0, cooldownUntil: 0 };
@@ -146,16 +147,20 @@ const actions = {
   /** 主题切换：浅色/深色，选择持久化，切完重绘换图标。 */
   toggleTheme() { flipTheme(); render(); },
 
-  /** 切换视图页签。两个后端互不影响，切走时只做必要的清理。 */
+  /** 切换视图页签。三个后端互不影响，切走时只做必要的清理。 */
   async setView(next) {
-    if (next !== "zcode" && next !== "workbuddy") return;
+    if (next !== "zcode" && next !== "workbuddy" && next !== "deepseek") return;
     if (view === next) return;
     if (view === "workbuddy") wb.onLeave();      // 停掉登录轮询等定时器
+    if (view === "deepseek") ds.onLeave();
     view = next;
     if (next === "workbuddy") {
       // 进 WorkBuddy 页先拉一次数据；失败也不挡渲染（页面自己会提示）
       render();
       wb.refresh().catch(() => {});
+    } else if (next === "deepseek") {
+      render();
+      ds.refresh().catch(() => {});
     } else {
       render();
     }
@@ -795,12 +800,16 @@ function restoreScroll(cap) {
 function tabsHtml() {
   const tab = (id, label) => `<button class="tab${view === id ? " on" : ""}"
     role="tab" aria-selected="${view === id}" click="actions.setView('${id}')">${esc(label)}</button>`;
-  return `<nav class="tabs" role="tablist">${tab("zcode", t("tab.zcode"))}${tab("workbuddy", t("tab.workbuddy"))}</nav>`;
+  return `<nav class="tabs" role="tablist">${tab("zcode", t("tab.zcode"))}${tab("workbuddy", t("tab.workbuddy"))}${tab("deepseek", t("tab.deepseek"))}</nav>`;
 }
 
 function render() {
   if (view === "workbuddy") {
     $app.innerHTML = wb.viewHtml(tabsHtml());
+    return;
+  }
+  if (view === "deepseek") {
+    $app.innerHTML = ds.viewHtml(tabsHtml());
     return;
   }
   const scrollCap = captureScroll();
@@ -1045,8 +1054,9 @@ async function sweepTick() {
 
 (async () => {
   try {
-    // 让 WorkBuddy 视图能在数据变化后请求重渲染（避免两模块互相 import 成环）
+    // 让另两个视图能在数据变化后请求重渲染（避免模块互相 import 成环）
     wb.bindRerender(() => { if (view === "workbuddy" && !uiLocked()) render(); });
+    ds.bindRerender(() => { if (view === "deepseek" && !uiLocked()) render(); });
 
     appVer = await invoke("app_version").catch(() => "");
     await refresh();

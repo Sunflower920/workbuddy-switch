@@ -108,6 +108,12 @@ pub struct Settings {
     pub auto_claim: Option<bool>,
     #[serde(default)]
     pub auto_smart_merge: Option<bool>,
+    /// DeepSeek 网关仓库目录（含 tools/account-pool.mjs）。为空时自动探测。
+    #[serde(default)]
+    pub ds_gateway_dir: Option<String>,
+    /// node 可执行文件路径；为空则用 PATH 里的 node。
+    #[serde(default)]
+    pub ds_node_path: Option<String>,
 }
 
 impl Settings {

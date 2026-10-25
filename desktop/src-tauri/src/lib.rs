@@ -1,5 +1,7 @@
 pub mod cipher;
 pub mod cli;
+/// DeepSeek 网关账号：调用网关仓库自带的 Node CLI（见模块内说明）
+pub mod deepseek;
 pub mod i18n;
 mod claim;
 mod flowlog;
@@ -1195,6 +1197,16 @@ pub fn run() {
             open_external,
             open_settings,
             reveal_main,
+            // ---- DeepSeek 网关（Node CLI）----
+            deepseek::ds_state,
+            deepseek::ds_capture,
+            deepseek::ds_switch,
+            deepseek::ds_drop,
+            deepseek::ds_gateway,
+            deepseek::ds_pick_gateway_dir,
+            deepseek::ds_set_gateway_dir,
+            deepseek::ds_pick_node,
+            deepseek::ds_set_node_path,
             // ---- WorkBuddy（侧车引擎）----
             workbuddy::wb_sidecar_info,
             workbuddy::wb_state,
