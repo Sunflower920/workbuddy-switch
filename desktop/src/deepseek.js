@@ -117,12 +117,15 @@ function currentLine() {
 
 /** 一个存档和当前登录是不是同一个号。
  *
- * 指纹来自会话 token：名字不同、token 相同，就是同一个号存了两份。不点破这一条，
- * 用户会以为自己换成功了（提示也确实说成功了），然后发现页面还是原来那个人。
+ * 判定在网关侧做（keys 分组）：同一个人的不同会话 token 不同，只比 token 会把
+ * 一个人认成两个；而不同存档能拿到的标识还不一样（有的只有 account id、有的只有
+ * 手机号），只比某一项又会认不出同一个人。分组把这些链子串起来。
+ *
+ * 不点破这一条，用户会以为自己换成功了（提示也确实说成功了），
+ * 然后发现页面还是原来那个人。
  */
 function isSameAsCurrent(a) {
-  const mine = state?.current?.fingerprint;
-  return Boolean(mine && a.fingerprint && mine === a.fingerprint);
+  return a.sameAsCurrent === true;
 }
 
 function rowHtml(a) {
