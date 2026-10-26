@@ -110,8 +110,19 @@ function currentLine() {
   const badge = c.loggedIn
     ? `<span class="tag-use">${esc(t("ds.signedIn"))}</span>`
     : `<span class="tag-relogin">${esc(t("ds.notSignedIn"))}</span>`;
-  return `<div class="ds-line">${esc(t("ds.signedInAs", { who }))} ${badge}
+  const fp = c.fingerprint ? `<span class="count">#${esc(c.fingerprint)}</span>` : "";
+  return `<div class="ds-line">${esc(t("ds.signedInAs", { who }))} ${badge} ${fp}
     <span class="count">${esc(t("ds.entries", { n: c.entriesPresent ?? 0, total: c.entriesExpected ?? 6 }))}</span></div>`;
+}
+
+/** 一个存档和当前登录是不是同一个号。
+ *
+ * 指纹来自会话 token：名字不同、token 相同，就是同一个号存了两份。不点破这一条，
+ * 用户会以为自己换成功了（提示也确实说成功了），然后发现页面还是原来那个人。
+ */
+function isSameAsCurrent(a) {
+  const mine = state?.current?.fingerprint;
+  return Boolean(mine && a.fingerprint && mine === a.fingerprint);
 }
 
 function rowHtml(a) {
@@ -135,16 +146,19 @@ function rowHtml(a) {
     ? `<span class="tag-use">${esc(t("ds.signedIn"))}</span>`
     : `<span class="tag-relogin">${esc(t("ds.notSignedIn"))}</span>`;
   const using = a.inUse ? `<span class="tag-multi">${esc(t("ds.inUse"))}</span>` : "";
+  // 和当前是同一个号：换过去等于没换，必须在点之前说清楚。
+  const same = isSameAsCurrent(a) ? `<span class="tag-relogin">${esc(t("ds.sameAccount"))}</span>` : "";
   const when = a.savedAt ? String(a.savedAt).slice(0, 16).replace("T", " ") : "?";
   // CLI 给的是字节数（快照是六文件，通常几 MB），这里换算成 MB 显示。
   const size = Number.isFinite(a.size) ? `${(a.size / 1024 / 1024).toFixed(1)} MB` : "";
+  const fp = a.fingerprint ? `#${esc(a.fingerprint)}` : "";
   return `
   <div class="row" data-name="${esc(a.name)}">
     <div class="row-top">
       <span class="notch" style="background:var(--notch-3)"></span>
       <div class="row-main">
-        <div class="row-name">${esc(a.name)} ${state_}${using}</div>
-        <div class="row-meta">${esc(who)}${size ? " · " + esc(size) : ""} · ${esc(when)}</div>
+        <div class="row-name">${esc(a.name)} ${state_}${using}${same}</div>
+        <div class="row-meta">${esc(who)}${fp ? " · " + esc(fp) : ""}${size ? " · " + esc(size) : ""} · ${esc(when)}</div>
       </div>
       <div class="row-actions">
         <button class="icon-btn" title="${esc(t("ds.rename"))}" aria-label="${esc(t("ds.rename"))}"
@@ -365,6 +379,14 @@ export const dsActions = {
       toast(t("ds.alreadyRunning"), "warn");
     } else {
       toast(t("ds.toastSwitched", { name }), "ok");
+    }
+    // 换完立刻核对档案里现在是谁：指纹对不上就是"提示成功、其实没换"，
+    // 这种情况不说出来，用户只会一遍遍重试同一个无效操作。
+    const fp = r.swapped?.after?.fingerprint;
+    if (r.swapped?.verified === false) {
+      toast(t("ds.switchNoEffect", { name }), "warn", t("ds.switchNoEffectDetail", { fp: fp || "?" }));
+    } else if (fp) {
+      toast(t("ds.switchVerified", { fp }), "ok");
     }
     await refresh();
   },
