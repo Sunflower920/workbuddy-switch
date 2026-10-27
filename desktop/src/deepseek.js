@@ -376,20 +376,19 @@ export const dsActions = {
     const r = await call("switch", () => invoke("ds_switch", { name }));
     if (!r) return;
     const started = r.started || {};
-    if (started.error) {
-      toast(t("ds.swapOkStartFailed"), "warn", String(started.error));
-    } else if (started.started === false && started.alreadyRunning) {
-      toast(t("ds.alreadyRunning"), "warn");
-    } else {
-      toast(t("ds.toastSwitched", { name }), "ok");
-    }
+    const sw = r.swapped || {};
     // 换完立刻核对档案里现在是谁：指纹对不上就是"提示成功、其实没换"，
     // 这种情况不说出来，用户只会一遍遍重试同一个无效操作。
-    const fp = r.swapped?.after?.fingerprint;
-    if (r.swapped?.verified === false) {
+    // 只发一条 toast —— 先说"已切到"再补一条警告，等于先报成功再打自己脸。
+    const fp = sw.after?.fingerprint;
+    if (sw.verified === false) {
       toast(t("ds.switchNoEffect", { name }), "warn", t("ds.switchNoEffectDetail", { fp: fp || "?" }));
-    } else if (fp) {
-      toast(t("ds.switchVerified", { fp }), "ok");
+    } else if (started.error) {
+      toast(t("ds.swapOkStartFailed"), "warn", String(started.error));
+    } else if (started.started === false && started.alreadyRunning) {
+      toast(t("ds.alreadyRunning"), "warn", fp ? t("ds.switchVerified", { fp }) : "");
+    } else {
+      toast(t("ds.toastSwitched", { name }), "ok", fp ? t("ds.switchVerified", { fp }) : "");
     }
     await refresh();
   },
