@@ -12,6 +12,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { esc, toast, openConfirmModal, toggleTheme as flipTheme, themeBtnHtml } from "./ui.js";
 import { ic } from "./icons.js";
 import { t } from "./i18n.js";
+// 三态与折叠是纯逻辑，单独放一个能被 Node 测的模块（见 src/deepseek-fold.js）。
+import { foldAccounts, loginStateOf, unreadableNames } from "./deepseek-fold.js";
 
 // ---------------------------------------------------------------- 模块状态
 
@@ -27,6 +29,10 @@ let loginOpened = false;
 let renamingName = null;
 /** 最近一次错误信息（null 表示无）。 */
 let failure = null;
+/** 已展开「同一个号的其它存档」的 group id（重渲染不会丢）。 */
+const expandedGroups = new Set();
+/** 上一次渲染时 group id 的下标表 —— 见 toggleGroup 的注释。 */
+let groupKeys = [];
 
 /** 重新渲染由 main.js 注入，避免模块互相 import 成环。 */
 let rerender = () => {};
@@ -97,6 +103,15 @@ function gatewayLine() {
   </div>`;
 }
 
+function loginBadge(state_, info) {
+  if (state_ === "signed-in") return `<span class="tag-use">${esc(t("ds.signedIn"))}</span>`;
+  if (state_ === "unknown") {
+    // 悬浮提示里点名是哪个文件读不到 —— 只说「读不到」会让人以为是登录态坏了。
+    return `<span class="tag-unknown" title="${esc(t("ds.stateUnknownWhy", { entry: unreadableNames(info) }))}">${esc(t("ds.stateUnknown"))}</span>`;
+  }
+  return `<span class="tag-relogin">${esc(t("ds.notSignedIn"))}</span>`;
+}
+
 /** 当前登录是谁（六文件在位情况 + 打码手机号）。
  *
  * 「未知账号」只是说档案里没有明文手机号，不等于没登录 —— 这两件事分开展示，
@@ -107,28 +122,17 @@ function currentLine() {
   if (c.error) return `<div class="wb-note err">${esc(c.error)}</div>`;
   if (c.exists === false) return `<div class="ds-line">${esc(t("ds.noProfile"))}</div>`;
   const who = (c.phones || []).join(", ") || t("ds.unknownAccount");
-  const badge = c.loggedIn
-    ? `<span class="tag-use">${esc(t("ds.signedIn"))}</span>`
-    : `<span class="tag-relogin">${esc(t("ds.notSignedIn"))}</span>`;
+  const state_ = loginStateOf(c);
   const fp = c.fingerprint ? `<span class="count">#${esc(c.fingerprint)}</span>` : "";
-  return `<div class="ds-line">${esc(t("ds.signedInAs", { who }))} ${badge} ${fp}
+  const line = `<div class="ds-line">${esc(t("ds.signedInAs", { who }))} ${loginBadge(state_, c)} ${fp}
     <span class="count">${esc(t("ds.entries", { n: c.entriesPresent ?? 0, total: c.entriesExpected ?? 6 }))}</span></div>`;
+  // 读不到时补一句为什么，以及这不是「没登录」—— 否则这一行读起来就是个坏消息。
+  if (state_ !== "unknown") return line;
+  return `${line}<div class="wb-note">${esc(t("ds.stateUnknownWhy", { entry: unreadableNames(c) }))}</div>`;
 }
 
-/** 一个存档和当前登录是不是同一个号。
- *
- * 判定在网关侧做（keys 分组）：同一个人的不同会话 token 不同，只比 token 会把
- * 一个人认成两个；而不同存档能拿到的标识还不一样（有的只有 account id、有的只有
- * 手机号），只比某一项又会认不出同一个人。分组把这些链子串起来。
- *
- * 不点破这一条，用户会以为自己换成功了（提示也确实说成功了），
- * 然后发现页面还是原来那个人。
- */
-function isSameAsCurrent(a) {
-  return a.sameAsCurrent === true;
-}
-
-function rowHtml(a) {
+function rowHtml(a, opts = {}) {
+  const { sub = false, toggle = "", extra = "" } = opts;
   const who = (a.phones || []).join(", ") || t("ds.unknownAccount");
   const renaming = a.name === renamingName;
   if (renaming) {
@@ -145,9 +149,7 @@ function rowHtml(a) {
     </div>`;
   }
   // 登没登录和能不能报出手机号是两件事：没有明文手机号也可能完全可用。
-  const state_ = a.loggedIn
-    ? `<span class="tag-use">${esc(t("ds.signedIn"))}</span>`
-    : `<span class="tag-relogin">${esc(t("ds.notSignedIn"))}</span>`;
+  const state_ = loginBadge(loginStateOf(a), a);
   const using = a.inUse ? `<span class="tag-multi">${esc(t("ds.inUse"))}</span>` : "";
   // 和当前是同一个号：换过去等于没换，必须在点之前说清楚。
   const same = isSameAsCurrent(a) ? `<span class="tag-relogin">${esc(t("ds.sameAccount"))}</span>` : "";
@@ -155,13 +157,15 @@ function rowHtml(a) {
   // CLI 给的是字节数（快照是六文件，通常几 MB），这里换算成 MB 显示。
   const size = Number.isFinite(a.size) ? `${(a.size / 1024 / 1024).toFixed(1)} MB` : "";
   const fp = a.fingerprint ? `#${esc(a.fingerprint)}` : "";
+  // 自动存档和人工存档在界面上长得一样，混在一组里就分不出哪份是退路。
+  const auto = a.auto ? ` · ${esc(t("ds.autoSaved"))}` : "";
   return `
-  <div class="row" data-name="${esc(a.name)}">
+  <div class="row${sub ? " row-copy" : ""}" data-name="${esc(a.name)}">
     <div class="row-top">
       <span class="notch" style="background:var(--notch-3)"></span>
       <div class="row-main">
-        <div class="row-name">${esc(a.name)} ${state_}${using}${same}</div>
-        <div class="row-meta">${esc(who)}${fp ? " · " + esc(fp) : ""}${size ? " · " + esc(size) : ""} · ${esc(when)}</div>
+        <div class="row-name">${esc(a.name)} ${state_}${using}${same}${toggle}</div>
+        <div class="row-meta">${esc(who)}${fp ? " · " + esc(fp) : ""}${size ? " · " + esc(size) : ""}${auto} · ${esc(when)}</div>
       </div>
       <div class="row-actions">
         <button class="icon-btn" title="${esc(t("ds.rename"))}" aria-label="${esc(t("ds.rename"))}"
@@ -173,7 +177,36 @@ function rowHtml(a) {
         </button>
       </div>
     </div>
+    ${extra}
   </div>`;
+}
+
+/** 一个存档和当前登录是不是同一个号。
+ *
+ * 判定在网关侧做（keys 分组）：同一个人的不同会话 token 不同，只比 token 会把
+ * 一个人认成两个；而不同存档能拿到的标识还不一样（有的只有 account id、有的只有
+ * 手机号），只比某一项又会认不出同一个人。分组把这些链子串起来。
+ *
+ * 不点破这一条，用户会以为自己换成功了（提示也确实说成功了），
+ * 然后发现页面还是原来那个人。
+ */
+function isSameAsCurrent(a) {
+  return a.sameAsCurrent === true;
+}
+
+/** 一组存档：代表项 + 「还有 N 份」的展开按钮（组是 foldAccounts 折出来的）。 */
+function groupHtml(g) {
+  const hidden = g.members.length - 1;
+  const open = expandedGroups.has(g.key);
+  const index = groupKeys.indexOf(g.key);
+  const toggle = hidden > 0
+    ? `<button class="tag-copies" title="${esc(t("ds.copiesHint", { n: g.members.length }))}"
+         click="dsActions.toggleGroup(${index})">${open ? "▾" : "▸"} ${esc(open ? t("ds.collapse") : t("ds.copies", { n: hidden }))}</button>`
+    : "";
+  const extra = open
+    ? `<div class="copy-list">${g.members.slice(1).map((m) => rowHtml(m, { sub: true })).join("")}</div>`
+    : "";
+  return rowHtml(g.lead, { toggle, extra });
 }
 
 function setupHtml() {
@@ -212,8 +245,12 @@ export function viewHtml(tabsHtml) {
   if (!state.found) return header + `<main class="list">${setupHtml()}</main>`;
 
   const accounts = state.accounts?.accounts || [];
-  const listHtml = accounts.length
-    ? accounts.map(rowHtml).join("")
+  const groups = foldAccounts(accounts);
+  // 渲染顺序即下标表：click 属性只传数字，不传账号名（名字里若有引号/逗号，
+  // runAttr 那套简单解析会把参数拆坏，点了没反应）。
+  groupKeys = groups.map((g) => g.key);
+  const listHtml = groups.length
+    ? groups.map(groupHtml).join("")
     : `<div class="empty">
          <div class="glyph">${ic("empty", 34)}</div>
          ${esc(t("ds.emptyTitle"))}<br>${esc(t("ds.emptyBody"))}
@@ -255,7 +292,11 @@ export function viewHtml(tabsHtml) {
       ${nodeLine()}
       <div class="section-head">
         <h2>${esc(t("ds.accountsTitle"))}</h2>
-        <span class="count">${accounts.length}</span>
+        <span class="count">${groups.length}${
+          accounts.length > groups.length
+            ? ` <span class="count-soft">· ${esc(t("ds.copiesTotal", { n: accounts.length }))}</span>`
+            : ""
+        }</span>
       </div>
       ${listHtml}
       <div class="wb-foot">${esc(state.dir || "")}</div>
@@ -290,6 +331,15 @@ export const dsActions = {
 
   toggleTheme() {
     flipTheme();
+    rerender();
+  },
+
+  /** 展开/收起同一个号的其它存档（只动显示，不碰磁盘）。 */
+  toggleGroup(index) {
+    const key = groupKeys[index];
+    if (!key) return;
+    if (expandedGroups.has(key)) expandedGroups.delete(key);
+    else expandedGroups.add(key);
     rerender();
   },
 

@@ -1308,3 +1308,53 @@ input:focus-visible,
   cursor: default;
   vertical-align: middle;
 }
+
+/* ============================================================
+   DeepSeek 视图：同一个号的第 2..N 份存档
+   ------------------------------------------------------------
+   号池里一个号可能有多份（换号前的自动存档 + 手动存的），折成一组后
+   代表项照常显示，其余缩进挂在下面。只用已有变量，两套主题都跟着走。
+   ============================================================ */
+.copy-list {
+  margin: 9px 0 0 10px;
+  padding-left: 10px;
+  border-left: 1px dashed var(--hairline);
+}
+.row-copy {
+  padding: 9px 10px 8px 14px;
+  background: var(--panel-2);
+  margin-bottom: 6px;
+}
+.row-copy:last-child { margin-bottom: 0; }
+.row-copy .row-name { font-size: 14.5px; gap: 6px; }
+.row-copy .row-meta { font-size: 12px; }
+.row-copy .btn-switch { padding: 5px 9px; font-size: 12.5px; }
+
+/* 「还有 N 份」：按一下展开，是个按钮，不是标签 */
+.tag-copies {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: .1em;
+  color: var(--blue);
+  background: transparent;
+  border: 1px solid var(--blue-dim);
+  border-radius: 3px;
+  padding: 0 5px;
+  flex: none;
+  cursor: pointer;
+}
+.tag-copies:hover { background: rgba(109, 168, 232, .14); }
+
+/* 第三态：读不到，不是「未登录」—— 颜色要比 amber 的未登录更弱 */
+.tag-unknown {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: .1em;
+  color: var(--ink-mute);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  padding: 0 4px;
+  flex: none;
+}
+
+.count-soft { opacity: .6; font-family: var(--mono); }
