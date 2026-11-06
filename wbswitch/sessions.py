@@ -1752,3 +1752,83 @@ def _sync_cloud_bound(*, dry_run: bool = False) -> dict:
         out["busy"] = out["busy"] or busy
     return out
 
+
+
+# --------------------------------------------------------------------------
+# 客户端侧边栏快照
+# --------------------------------------------------------------------------
+
+def sidebar_snapshot_path(uid: str) -> Path:
+    """客户端侧边栏快照（每个账号一个目录）。"""
+    return paths.workbuddy_dir() / uid / "sidebar-list-snapshot.json"
+
+
+def sync_sidebar_snapshot(uid: str, *, dry_run: bool = False) -> dict:
+    """把客户端侧边栏快照与该账号的会话表对齐。
+
+    客户端启动时先用这份快照渲染列表，合并/复制只写 sessions 表时，
+    用户切过去看到的仍是旧列表——表现为「同步完成了，但那个账号里没有新会话」。
+    这里按会话表重建 items：
+      - 只取未删除会话
+      - 已存在的条目保留客户端自己写的字段（state / isPinned / automationId…）
+      - 新会话按客户端同款结构补齐
+      - 按 updatedAt 倒序
+    """
+    snap_path = sidebar_snapshot_path(uid)
+    if not snap_path.exists():
+        return {"ok": False, "reason": "该账号没有侧边栏快照（客户端还没启动过）"}
+    try:
+        snap = json.loads(snap_path.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001 - 任何解析错误都不该影响主流程
+        return {"ok": False, "reason": "快照解析失败：" + str(e)}
+
+    old_items = snap.get("items") or []
+    old = {str(i.get("id")): i for i in old_items if i.get("id")}
+
+    conn = _live_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id,title,custom_title,status,transport,cwd,updated_at,"
+            "last_activity_at FROM sessions"
+            " WHERE user_id=? AND deleted_at IS NULL", (uid,)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    items = []
+    for sid, title, custom, status, transport, cwd, upd, act in rows:
+        prev = old.get(str(sid)) or {}
+        item = {
+            "id": sid,
+            "title": custom or title or "",
+            "state": prev.get("state") or ("error" if str(status) == "error" else "idle"),
+            "transport": transport or prev.get("transport") or "local",
+            "kind": prev.get("kind") or "task",
+            "lastActivityAt": int(act or upd or 0),
+            "isPinned": bool(prev.get("isPinned", False)),
+            "conversationOrigin": prev.get("conversationOrigin") or "local",
+            "updatedAt": int(upd or 0),
+            "isUserDefinedTitle": 1 if custom else 0,
+            "space": {"type": "local", "name": cwd or ""},
+        }
+        for extra in ("automationId", "isBackgroundAutomation"):
+            if extra in prev:
+                item[extra] = prev[extra]
+        items.append(item)
+    items.sort(key=lambda i: -(i.get("updatedAt") or 0))
+
+    new_ids = {i["id"] for i in items}
+    added = len(new_ids - set(old))
+    removed = len(set(old) - new_ids)
+    if dry_run:
+        return {"ok": True, "dry_run": True, "total": len(items),
+                "added": added, "removed": removed, "path": str(snap_path)}
+
+    snap["items"] = items
+    snap["savedAt"] = int(time.time() * 1000)
+    snap.setdefault("version", 3)
+    tmp = snap_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(snap_path)
+    return {"ok": True, "total": len(items), "added": added,
+            "removed": removed, "path": str(snap_path)}

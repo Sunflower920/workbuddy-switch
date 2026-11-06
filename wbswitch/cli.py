@@ -509,6 +509,25 @@ def cmd_diagnose(args) -> int:
 
 def cmd_sessions(args) -> int:
     """查看或操作会话档案库。"""
+    if getattr(args, "sync_sidebar", None) is not None:
+        # 客户端启动时用快照渲染列表；合并/复制后不补快照就会出现
+        # 「库里有了、用户切过去看不到」（11/6 事故）
+        uids = ([args.sync_sidebar] if args.sync_sidebar
+                else [a.uid for a in profiles.list_accounts()
+                      if a.uid])
+        rep = {u: sessions.sync_sidebar_snapshot(
+            u, dry_run=getattr(args, "dry_run", False)) for u in uids}
+        if getattr(args, "json", False):
+            _emit_json(rep)
+            return 0
+        for u, r in rep.items():
+            if r.get("ok"):
+                _out(f"  {u[:8]}: {r.get('total', 0)} 条"
+                     f"（新增 {r.get('added', 0)}，移除 {r.get('removed', 0)}）")
+            else:
+                _out(f"  {u[:8]}: {r.get('reason')}")
+        return 0
+
     if getattr(args, "pin_titles", False):
         rep = sessions.pin_copy_titles(dry_run=getattr(args, "dry_run", False))
         if getattr(args, "json", False):
@@ -1379,6 +1398,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--pin-titles", action="store_true",
                    help="把副本会话的标题钉进 custom_title（客户端只重算自动"
                         "标题槽，钉住后发新消息也不会改名）")
+    s.add_argument("--sync-sidebar", nargs="?", const="", default=None,
+                   metavar="UID",
+                   help="把客户端侧边栏快照与会话表对齐（不指定 UID 则所有账号）；"
+                        "合并/复制后客户端列表不刷新时用它补")
     s.add_argument("--sync-cloud", action="store_true",
                    help="把云端归属映射修正为与档案库一致")
     s.add_argument("--edition", choices=("cn", "intl"), default=None,

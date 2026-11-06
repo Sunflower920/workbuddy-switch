@@ -307,4 +307,12 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
             }
         except Exception as e:  # dedupe 失败不抹掉已成功的复制
             report["errors"].append(f"dedupe 失败: {e}")
+
+    # ---- 客户端侧边栏快照同步：客户端启动时先用快照渲染列表，不补的话
+    #      会出现「库里已经有、用户切过去看不到」（11/6 事故）----
+    if copied:
+        try:
+            report["sidebar"] = sessions.sync_sidebar_snapshot(target_uid)
+        except Exception as e:
+            report["errors"].append(f"侧边栏快照同步失败: {e}")
     return report
