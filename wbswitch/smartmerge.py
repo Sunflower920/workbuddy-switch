@@ -68,10 +68,21 @@ def _titles(arch: sqlite3.Connection) -> dict:
 
 
 def _title_of(sid: str, live_rows: dict, titles: dict) -> tuple:
-    """会话的（标题, 自定义标题）——客户端行优先，档案快照兜底。"""
+    """会话的（标题, 用户真正改名后的标题）。
+
+    复制副本时会把 title 钉进 custom_title（防客户端发消息重算标题）。
+    这种"钉住"不是用户改名：custom_title == title 一律视为未改名。
+    否则 _title_of(原创)=(X,"") 永远 != _title_of(副本)=(X,X)，
+    每轮同步都会误判"标题变化"→ 同大小也复制 → 无限增殖
+    （11/6 事故：同一会话每 3 分钟增殖一条，累计 13 份）。
+    """
     row = live_rows.get(sid)
     if row is not None:
-        return (str(row.get("title") or ""), str(row.get("custom_title") or ""))
+        title = str(row.get("title") or "")
+        custom = str(row.get("custom_title") or "")
+        if custom and custom == title:
+            custom = ""
+        return (title, custom)
     return (titles.get(sid) or "", "")
 
 
@@ -148,17 +159,23 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
             continue
         s_size = _rank(sid, live_rows)[0]
         t_size = _rank(tgt_sid, live_rows)[0]
+        # 源本身是复制品且不比目标大 → 绝不回灌，否则 A→B→A 来回复制，
+        # 每轮多一份（11/6 事故的放大路径之一）
+        if sid in parent and s_size <= t_size:
+            plan.append((sid, "skip", "源本身是副本且不比目标大"))
+            continue
         if s_size > t_size:
             plan.append((sid, "copy",
                          f"源正文更大（{s_size // 1024}KB > {t_size // 1024}KB）"))
         elif s_size == t_size:
-            # 同大小：标题/自定义标题变了（如改名）才值得复制；
-            # 仅 updated_at 变化（打开过、未改内容）视为无变化，跳过
-            if _title_of(sid, live_rows, titles) != \
-                    _title_of(tgt_sid, live_rows, titles):
-                plan.append((sid, "copy", "标题变化（正文同大小）"))
-            else:
-                plan.append((sid, "skip", "内容与标题均一致"))
+            # 同大小一律不复制：标题差异最常见的来源就是"副本把 title 钉进
+            # custom_title"，把它当变化会每轮复制一份（11/6 事故：同一会话
+            # 每 3 分钟增殖一条）。确需同步改名请用「复制会话」手动按钮。
+            diff = _title_of(sid, live_rows, titles) != \
+                _title_of(tgt_sid, live_rows, titles)
+            plan.append((sid, "skip",
+                         "标题不同但正文同大小，不复制" if diff
+                         else "内容与标题均一致"))
         else:
             plan.append((sid, "skip", "目标正文更大"))
 
