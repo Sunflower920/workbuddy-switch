@@ -639,8 +639,19 @@ fn persist_oauth_account(
         .ok_or_else(|| i18n::tr("err.oauth.no_token"))?
         .to_string();
     let raw_access = oauth::extract_access_token(provider, raw).unwrap_or_default();
+    // 换业务令牌要访问 api.z.ai：国内直连常年超时。换不到不能把整次登录作废——
+    // 账号照样落库（jwt 那条 zcode-plan 通道不依赖它），只是 coding-plan 条目留空。
+    let mut degrade: Option<String> = None;
     let access_token = if provider == "zai" && !raw_access.is_empty() {
-        oauth::resolve_zai_business_token(&raw_access).ok_or_else(|| i18n::tr("err.oauth.zai_business"))?
+        let proxy = load_settings(paths).auth_proxy();
+        match oauth::resolve_zai_business_token_via(&raw_access, proxy.as_deref()) {
+            Some(t) => t,
+            None => {
+                flowlog::log(flow, "zai-business-fallback", "api.z.ai unreachable, keep oauth token");
+                degrade = Some(i18n::tr("err.oauth.zai_business"));
+                raw_access.clone()
+            }
+        }
     } else {
         raw_access
     };
@@ -662,7 +673,8 @@ fn persist_oauth_account(
         (!access_token.is_empty()).then_some(access_token.as_str()),
         refresh_token.as_deref(),
     );
-    let config = oauth::assemble_config(provider, &jwt, &access_token);
+    // 降级时不要再拿 oauth token 去查 api key（同样会卡 20s 超时），直接留空
+    let config = oauth::assemble_config(provider, &jwt, if degrade.is_some() { "" } else { &access_token });
 
     let _lock = store_guard();
     if !flow_still_ours() {
@@ -684,7 +696,7 @@ fn persist_oauth_account(
         }
         save_account(paths, &dup)?;
         *pending_oauth_guard() = None;
-        return Ok(json!({ "id": dup.id, "name": dup.name, "provider": provider, "duplicate": true }));
+        return Ok(json!({ "id": dup.id, "name": dup.name, "provider": provider, "duplicate": true, "warning": degrade }));
     }
     let base = credentials
         .get(format!("oauth:{provider}:user_info"))
@@ -713,7 +725,7 @@ fn persist_oauth_account(
     }
     save_account(paths, &acc)?;
     *pending_oauth_guard() = None;
-    Ok(json!({ "id": acc.id, "name": acc.name, "provider": provider }))
+    Ok(json!({ "id": acc.id, "name": acc.name, "provider": provider, "warning": degrade }))
 }
 
 fn finalize_oauth_result(app: &AppHandle, result: Result<serde_json::Value, String>) {

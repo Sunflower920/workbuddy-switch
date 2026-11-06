@@ -466,10 +466,22 @@ pub const START_PLAN_ANTHROPIC_BASE: &str = "https://zcode.z.ai/api/v1/zcode-pla
 const API_KEY_NAME: &str = "zcode-api-key";
 
 fn web_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
+    web_agent_with_proxy(None)
+}
+
+/// 构建 HTTP 客户端。`proxy` 为设置里的本地代理（如 http://127.0.0.1:7897）：
+/// 国内直连 api.z.ai 常年超时，登录窗口走代理能开，但换令牌/查配额是进程内请求，
+/// 不带上代理就会卡到超时（表现为「登录成功却保存不下来」）。
+fn web_agent_with_proxy(proxy: Option<&str>) -> ureq::Agent {
+    let mut b = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
-        .timeout(Duration::from_secs(15))
-        .build()
+        .timeout(Duration::from_secs(20));
+    if let Some(p) = proxy.map(str::trim).filter(|p| !p.is_empty()) {
+        if let Ok(px) = ureq::Proxy::new(p) {
+            b = b.proxy(px);
+        }
+    }
+    b.build()
 }
 
 pub fn extract_access_token(provider: &str, raw: &Value) -> Option<String> {
@@ -592,27 +604,46 @@ pub fn resolve_biz_api_key(base: &str, auth: &str, require_secret: bool) -> Opti
 }
 
 pub fn resolve_zai_business_token(zai_access_token: &str) -> Option<String> {
-    resolve_zai_business_token_at(ZAI_BUSINESS_LOGIN_URL, zai_access_token)
+    resolve_zai_business_token_via(zai_access_token, None)
 }
 
-fn resolve_zai_business_token_at(url: &str, zai_access_token: &str) -> Option<String> {
-    let resp = web_agent()
-        .post(url)
-        .set("Content-Type", "application/json")
-        .send_json(json!({ "token": zai_access_token }))
-        .ok()?
-        .into_string()
-        .ok()?;
-    let v: Value = serde_json::from_str(&resp).ok()?;
-    ["access_token", "accessToken"]
-        .iter()
-        .find_map(|k| {
+/// 换 z.ai 业务令牌（带代理与重试）。直连被阻断时返回 None，由调用方决定降级。
+pub fn resolve_zai_business_token_via(zai_access_token: &str, proxy: Option<&str>) -> Option<String> {
+    resolve_zai_business_token_at(ZAI_BUSINESS_LOGIN_URL, zai_access_token, proxy)
+}
+
+fn resolve_zai_business_token_at(url: &str, zai_access_token: &str, proxy: Option<&str>) -> Option<String> {
+    let token = zai_access_token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    // 网络抖动很常见，失败重试一次；仍然失败就交给调用方降级，绝不能因此丢掉账号
+    for attempt in 0..2u32 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(600));
+        }
+        let Ok(body) = web_agent_with_proxy(proxy)
+            .post(url)
+            .set("Content-Type", "application/json")
+            .send_json(json!({ "token": token }))
+            .map(|r| r.into_string().unwrap_or_default())
+        else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<Value>(&body) else {
+            continue;
+        };
+        if let Some(t) = ["access_token", "accessToken"].iter().find_map(|k| {
             v.pointer(&format!("/data/{k}"))
                 .and_then(|x| x.as_str())
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(String::from)
-        })
+        }) {
+            return Some(t);
+        }
+    }
+    None
 }
 
 pub fn assemble_config(provider: &str, jwt: &str, access_token: &str) -> Value {

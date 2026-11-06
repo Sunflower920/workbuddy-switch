@@ -1010,7 +1010,8 @@ listen("oauth://done", (ev) => {
     toast(t("m.oauthDup", { name: p.name }), "warn", t("m.oauthDupDetail"));
     return;
   }
-  toast(t("m.oauthOk", { name: p.name }), "ok", t("m.oauthOkDetail"));
+  // 换业务令牌失败时后台会降级保存并带 warning：把原因说清楚，别让用户以为已经万事大吉
+  toast(t("m.oauthOk", { name: p.name }), "ok", p.warning || t("m.oauthOkDetail"));
   refresh().then(() => { if (!uiLocked()) { render(); enrollAccounts(); } }).catch(() => {});
 });
 
