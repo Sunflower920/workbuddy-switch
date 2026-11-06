@@ -173,6 +173,11 @@ async function checkAutoMerge() {
               copied: r.copied, deduped: r.dedupe?.removed ?? 0,
             }));
         }
+        // 合并被中途打断（客户端启动导致去重跳过 → 已回滚）时必须告知，
+        // 否则用户只会看到"没同步成功"（11/6 事故）
+        if (r && Array.isArray(r.errors) && r.errors.length) {
+          toast(String(r.errors[0]), "err");
+        }
         delete autoMergePending[uid];
       }
       await refresh({ silent: true });
@@ -802,6 +807,9 @@ export const wbActions = {
             copied: r.copied ?? 0, deduped: r.dedupe?.removed ?? 0,
             failed: r.failed ?? 0,
           }));
+        if (Array.isArray(r.errors) && r.errors.length) {
+          toast(String(r.errors[0]), "err");
+        }
         await refreshData();
       },
     });

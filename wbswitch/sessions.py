@@ -1832,3 +1832,32 @@ def sync_sidebar_snapshot(uid: str, *, dry_run: bool = False) -> dict:
     tmp.replace(snap_path)
     return {"ok": True, "total": len(items), "added": added,
             "removed": removed, "path": str(snap_path)}
+
+def soft_delete_sessions(sids, *, reason: str = "") -> int:
+    """把会话标记为已删除（deleted_at=毫秒时间戳），正文与工作区保留。
+
+    用于回滚「不该让用户看见」的副本：例如合并复制完成后去重被客户端启动
+    打断，副本会和旧版并存成为重复会话。软删除可逆（置回 NULL 即恢复）。
+    """
+    ids = [sid for sid in (sids or []) if sid]
+    if not ids:
+        return 0
+    conn = _live_conn()
+    try:
+        now = int(time.time() * 1000)
+        conn.execute("BEGIN IMMEDIATE")
+        n = 0
+        for sid in ids:
+            n += conn.execute(
+                "UPDATE sessions SET deleted_at=? WHERE id=? AND deleted_at IS NULL",
+                (now, sid)).rowcount
+        conn.commit()
+        return n
+    except sqlite3.Error:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        conn.close()

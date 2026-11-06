@@ -216,6 +216,7 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     edition = paths.current_edition()
     copied = failed = 0
+    new_sids: list[str] = []
     try:
         for i, (sid, _act, _why) in enumerate(to_copy, 1):
             if on_progress:
@@ -269,6 +270,7 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
             arch.execute(
                 _LINEAGE_SQL, (new_sid, sid, source_uid, target_uid, stamp))
             copied += 1
+            new_sids.append(new_sid)
         live.commit()
         arch.commit()
         if edge_conn is not None:
@@ -305,6 +307,15 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
                 "backup_tag": rep.backup_tag, "quarantine": rep.quarantine,
                 "errors": rep.errors,
             }
+            # 竞态：复制期间客户端启动了 → 去重被跳过 → 新旧副本并存成"重复会话"
+            # （11/6 15:05 事故）。回滚本次复制的可见性，宁可这次不合并，
+            # 也不给用户看重复。正文与谱系保留，客户端关闭后可重跑。
+            if rep.errors and any("正在运行" in str(e) for e in rep.errors):
+                rolled = sessions.soft_delete_sessions(new_sids)
+                report["rolled_back"] = rolled
+                report["errors"].append(
+                    "合并途中 WorkBuddy 启动了，去重无法执行；"
+                    f"本次复制的 {rolled} 条已回滚（正文保留），请关闭客户端后重试")
         except Exception as e:  # dedupe 失败不抹掉已成功的复制
             report["errors"].append(f"dedupe 失败: {e}")
 
