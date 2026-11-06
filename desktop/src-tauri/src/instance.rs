@@ -641,7 +641,10 @@ fn synth_config(paths: &Paths, creds: &Value) -> Value {
     let Some(jwt) = jwt else { return out };
     let at = cred_plain(creds, &format!("oauth:{provider}:access_token"), &paths.home).unwrap_or_default();
     let at = if provider == "zai" && !at.is_empty() {
-        crate::oauth::resolve_zai_business_token(&at).unwrap_or(at)
+        let st = store::load_settings(paths);
+        let proxy = st.auth_proxy().map(str::to_string);
+        let resolved = crate::oauth::resolve_zai_business_token_via(&at, proxy.as_deref());
+        resolved.unwrap_or(at)
     } else {
         at
     };

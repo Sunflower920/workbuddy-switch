@@ -1153,7 +1153,11 @@ fn rematerialize_wiped_builtins(paths: &Paths, target: &Account) {
         (false, None) => String::new(),
     };
     let access_token = if provider == "zai" && !access_token.is_empty() {
-        crate::oauth::resolve_zai_business_token(&access_token).unwrap_or(access_token)
+        // 走设置里的代理；失败保留原 token（不能因为换不到业务令牌就让切号卡 20s 或失败）
+        let st = load_settings(paths);
+        let proxy = st.auth_proxy().map(str::to_string);
+        let resolved = crate::oauth::resolve_zai_business_token_via(&access_token, proxy.as_deref());
+        resolved.unwrap_or(access_token)
     } else {
         access_token
     };

@@ -643,7 +643,8 @@ fn persist_oauth_account(
     // 账号照样落库（jwt 那条 zcode-plan 通道不依赖它），只是 coding-plan 条目留空。
     let mut degrade: Option<String> = None;
     let access_token = if provider == "zai" && !raw_access.is_empty() {
-        let proxy = load_settings(paths).auth_proxy();
+        let st = load_settings(paths);
+        let proxy = st.auth_proxy().map(str::to_string);
         match oauth::resolve_zai_business_token_via(&raw_access, proxy.as_deref()) {
             Some(t) => t,
             None => {
