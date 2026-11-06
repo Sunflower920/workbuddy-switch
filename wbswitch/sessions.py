@@ -1586,7 +1586,19 @@ def _dedupe_sessions_bound(uid: str, *, dry_run: bool = False,
         for root, ordered in dup_groups:
             kept_sid = ordered[0]
             for sid in ordered[1:]:
-                # ① 正文与附属文件 → 隔离区
+                # ① 先删客户端索引并立即提交。
+                #    顺序很重要：先移正文再删行时，一旦删行失败（客户端抢锁/写库
+                #    被拒），正文已经进了隔离区而记录还在 → 变成「点开空白」的
+                #    空壳会话（11/6 15:54 事故）。反过来最坏只是正文文件残留。
+                try:
+                    live.execute(
+                        "DELETE FROM sessions WHERE id = ?", (sid,)
+                    )
+                    live.commit()
+                except sqlite3.Error as e:
+                    rep.errors.append(f"{sid[:8]}: 删除客户端索引失败（{e}）")
+                    continue
+                # ② 正文与附属文件 → 隔离区
                 body = paths.find_session_body(sid)
                 if body is not None:
                     try:
@@ -1598,21 +1610,13 @@ def _dedupe_sessions_bound(uid: str, *, dry_run: bool = False,
                     except OSError as e:
                         rep.errors.append(f"{sid[:8]}: 正文移入隔离区失败（{e}）")
                         continue
-                # ② 工作区目录 → 隔离区
+                # ③ 工作区目录 → 隔离区
                 ws = ws_base / sid
                 if ws.is_dir():
                     try:
                         shutil.move(str(ws), str(trash / sid / "_workspace"))
                     except OSError:
                         pass  # 工作区移不动不阻塞去重，正文已入隔离区
-                # ③ 客户端索引
-                try:
-                    live.execute(
-                        "DELETE FROM sessions WHERE id = ?", (sid,)
-                    )
-                except sqlite3.Error as e:
-                    rep.errors.append(f"{sid[:8]}: 删除客户端索引失败（{e}）")
-                    continue
                 # ④ 云端映射
                 if edge_conn is not None:
                     try:
