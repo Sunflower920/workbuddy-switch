@@ -399,6 +399,22 @@ def cmd_backup(args) -> int:
 
 
 def cmd_backups(args) -> int:
+    if getattr(args, "prune", False):
+        rep = engine.prune_backups(
+            getattr(args, "days", None) or None,
+            dry_run=getattr(args, "dry_run", False),
+        )
+        if args.json:
+            _emit_json(rep)
+            return 0
+        _out(f"保留策略：最近 {rep['keep_days']} 天"
+             + ("（演练，未删除）" if rep["dry_run"] else ""))
+        _out(f"  删除 {rep['removed']} 份，释放 {rep['freed_bytes'] / 1024 / 1024:.1f} MB"
+             f"，保留 {rep['kept']} 份")
+        for e in rep["errors"][:5]:
+            _out("  失败: " + e)
+        return 0
+
     items = engine.list_backups()
     if args.json:
         _emit_json([b.__dict__ for b in items])
@@ -1349,6 +1365,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("backups", help="列出备份")
     s.add_argument("--json", action="store_true")
+    # 保留策略：只留最近 N 天（默认取设置 backup_keep_days，7 天）
+    s.add_argument("--prune", action="store_true", help="清理超过保留天数的旧备份")
+    s.add_argument("--days", type=int, default=0, help="保留天数（默认取设置，7）")
+    s.add_argument("--dry-run", action="store_true", help="只统计要删多少，不实际删除")
     s.set_defaults(func=cmd_backups)
 
     s = sub.add_parser("rollback", help="回滚到指定备份")

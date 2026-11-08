@@ -26,6 +26,9 @@ class Settings:
     # 安全
     auto_backup: bool = True          # 切换前自动全量备份
     auto_capture: bool = True         # 自动保全当前登录
+    # 备份保留天数：超过这个天数的备份在每次新建备份后自动清理
+    # （始终保留最近 min_keep 份，避免长期没备份时把唯一一份删掉）
+    backup_keep_days: int = 7
     # 同步范围
     merge_memory: bool = True
     merge_connectors: bool = True

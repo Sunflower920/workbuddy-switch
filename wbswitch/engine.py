@@ -404,16 +404,26 @@ def create_backup(
     label: str = "",
     tag: str | None = None,
     edition: str | None = None,
+    prune: bool = True,
 ) -> BackupInfo:
     """全量备份指定版本（默认当前版本）的数据：数据库、记忆、连接器、
     账号私有存储与定时任务文件。
 
     备份是迁移的前置条件，任何失败都会抛出异常阻止后续写入。
     备份元数据里记录来源版本，回滚时按它还原到对应版本的数据根。
+
+    `prune=True` 时顺带按保留策略清理旧备份（默认 7 天，见 config.backup_keep_days）。
+    回滚流程内部会传 False —— 它马上要读某个旧备份，不能在那之前被清掉。
     """
     ed = paths.normalize_edition(edition) or paths.current_edition()
     with paths.use_edition(ed):
-        return _create_backup_bound(target_uid, source_uid, label, tag, ed)
+        info = _create_backup_bound(target_uid, source_uid, label, tag, ed)
+    if prune:
+        try:
+            prune_backups(protect={info.tag})
+        except Exception:
+            pass  # 清理失败不影响备份本身
+    return info
 
 
 def _create_backup_bound(
@@ -559,6 +569,103 @@ def list_backups() -> list[BackupInfo]:
     return out
 
 
+def _backup_time(tag: str, created_at: str, path: Path) -> float:
+    """备份的时间戳：优先目录名里的 YYYYMMDDHHMMSS，其次 meta.created_at，最后 mtime。"""
+    head = tag[:14]
+    if len(head) == 14 and head.isdigit():
+        try:
+            return time.mktime(time.strptime(head, "%Y%m%d%H%M%S"))
+        except ValueError:
+            pass
+    if created_at:
+        try:
+            return time.mktime(time.strptime(created_at, "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            pass
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return time.time()
+
+
+def prune_backups(
+    keep_days: int | None = None,
+    *,
+    min_keep: int = 1,
+    dry_run: bool = False,
+    protect: set[str] | None = None,
+    partial_hours: int = 2,
+) -> dict:
+    """按保留策略清理旧备份：只保留最近 `keep_days` 天（默认取设置，7 天）。
+
+    安全约束：
+      - 最近的 `min_keep` 份永不删除（哪怕全都过期）；
+      - `protect` 里的 tag 永不删除（刚建好/正在回滚的那份）；
+      - 写到一半的 `*.partial` 超过 `partial_hours` 才清，避免误删进行中的备份。
+
+    返回 {"removed", "freed_bytes", "kept", "errors", "dry_run", "keep_days"}。
+    """
+    if keep_days is None:
+        try:
+            from . import config
+
+            keep_days = int(config.load().backup_keep_days or 7)
+        except Exception:
+            keep_days = 7
+    keep_days = max(1, int(keep_days))
+
+    out = {"removed": 0, "freed_bytes": 0, "kept": 0,
+           "errors": [], "dry_run": dry_run, "keep_days": keep_days}
+    root = paths.backups_dir()
+    if not root.exists():
+        return out
+
+    protect = set(protect or ())
+    cutoff = time.time() - keep_days * 86400
+    items: list[tuple[Path, float, str]] = []
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        if entry.name.endswith(".partial"):
+            try:
+                age = time.time() - entry.stat().st_mtime
+            except OSError:
+                continue
+            if age > partial_hours * 3600:
+                items.append((entry, -1.0, entry.name))  # 残骸，优先清
+            continue
+        meta = profiles.read_json_safe(entry / "meta.json") or {}
+        tag = str(meta.get("tag") or entry.name)
+        items.append((entry, _backup_time(tag, str(meta.get("created_at") or ""), entry), tag))
+
+    # 最近的 min_keep 份无条件保留（按时间倒序取前 N）
+    real = sorted((x for x in items if x[1] >= 0), key=lambda x: x[1], reverse=True)
+    keep_names = {p.name for p, _, _ in real[:max(0, int(min_keep))]}
+
+    for path, ts, tag in items:
+        if path.name in keep_names or tag in protect:
+            out["kept"] += 1
+            continue
+        if ts >= 0 and ts >= cutoff:
+            out["kept"] += 1
+            continue
+        if dry_run:
+            out["removed"] += 1
+            try:
+                out["freed_bytes"] += _dir_size(path)
+            except OSError:
+                pass
+            continue
+        try:
+            size = _dir_size(path)
+            shutil.rmtree(path)
+            out["removed"] += 1
+            out["freed_bytes"] += size
+        except OSError as e:
+            out["errors"].append(f"{path.name}: {e}")
+    return out
+
+
 def find_backup(tag: str) -> BackupInfo | None:
     for b in list_backups():
         if b.tag == tag:
@@ -576,7 +683,12 @@ def restore_backup(tag: str) -> list[str]:
     if info is None:
         raise RuntimeError(t("err.no_backup", tag=tag))
     with paths.use_edition(info.edition):
-        return _restore_backup_bound(info)
+        done = _restore_backup_bound(info)
+    try:
+        prune_backups(protect={info.tag})
+    except Exception:
+        pass
+    return done
 
 
 def _restore_backup_bound(info: BackupInfo) -> list[str]:
@@ -584,7 +696,8 @@ def _restore_backup_bound(info: BackupInfo) -> list[str]:
     done: list[str] = []
 
     # 还原前先把当前状态也备份一次，避免"回滚把回滚本身弄丢"
-    create_backup(info.target_uid, label=f"pre-rollback {info.tag}")
+    # （prune=False：不能把马上要读的那个旧备份顺手清掉）
+    create_backup(info.target_uid, label=f"pre-rollback {info.tag}", prune=False)
 
     db_src = src / "workbuddy.db"
     if db_src.exists():
