@@ -532,6 +532,8 @@ def list_backups() -> list[BackupInfo]:
     for entry in d.iterdir():
         if not entry.is_dir() or entry.name.endswith(".partial"):
             continue  # 写到一半的备份不参与列表/回滚
+        if not (entry / "meta.json").exists():
+            continue  # 历史中断留下的残骸（没有 meta 就无法回滚）
         meta = profiles.read_json_safe(entry / "meta.json") or {}
         info = BackupInfo(
             tag=str(meta.get("tag") or entry.name),
