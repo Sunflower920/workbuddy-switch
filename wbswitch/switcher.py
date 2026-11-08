@@ -19,7 +19,7 @@ from __future__ import annotations
 import time
 from dataclasses import asdict, dataclass, field
 
-from . import client, config, engine, paths, profiles, sessions
+from . import client, config, engine, fileops, paths, profiles, sessions
 from .i18n import t
 
 # --------------------------------------------------------------------------
@@ -303,7 +303,11 @@ def switch_to(
                 except Exception as e:
                     result.warnings.append(f"activate sessions failed: {e}")
 
-            restored = profiles.restore_private(target)
+            try:
+                restored = profiles.restore_private(target)
+            except OSError as e:
+                result.warnings.append(f"restore private failed: {fileops.describe(e)}")
+                restored = 0
             target.stats = engine.scan_stats(target.uid)
             target.stats.private_files = restored or target.stats.private_files
             target.last_seen_at = profiles.now_ts()
@@ -380,18 +384,23 @@ def switch_to(
     #      会话**不在这里搬**：它的归属由 sessions 档案库按 owner 管理，
     #      硬搬会让账号间来回丢数据。会话在下面的第 4c 步激活。
     if source_uid:
-        report = engine.sync(
-            source_uid,
-            target.uid,
-            do_backup=settings.auto_backup,
-            do_sessions=False,
-            do_memory=settings.merge_memory,
-            do_connectors=settings.merge_connectors,
-            do_automations=settings.merge_automations,
-            do_settings=settings.merge_settings,
-            dry_run=dry_run,
-            label=f"switch->{target.name}",
-        )
+        try:
+            report = engine.sync(
+                source_uid,
+                target.uid,
+                do_backup=settings.auto_backup,
+                do_sessions=False,
+                do_memory=settings.merge_memory,
+                do_connectors=settings.merge_connectors,
+                do_automations=settings.merge_automations,
+                do_settings=settings.merge_settings,
+                dry_run=dry_run,
+                label=f"switch->{target.name}",
+            )
+        except OSError as e:
+            # 客户端仍占着文件（未退出/没退干净）：给出可操作提示，
+            # 不把 [WinError 33] 这种原始报错甩到界面上。
+            raise RuntimeError(t("err.file_locked", e=fileops.describe(e))) from e
         result.report = report.to_dict()
         result.backup_tag = report.backup_tag
         result.warnings.extend(report.warnings)
@@ -477,7 +486,10 @@ def switch_to(
             "oneidAccountId": target.oneid_account_id,
             "savedAt": int(time.time() * 1000),
         }
-        _write_identity_verified(primary, target.uid, retries=3 if hot else 1)
+        try:
+            _write_identity_verified(primary, target.uid, retries=3 if hot else 1)
+        except OSError as e:
+            raise RuntimeError(t("err.file_locked", e=fileops.describe(e))) from e
         result.identity_written = True
 
     # 「是否需要用户登录」= 没换成功，或换过去的凭据已过期。

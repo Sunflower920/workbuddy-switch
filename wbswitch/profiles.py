@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import paths
+from . import fileops, paths
 from .i18n import t
 
 _ID_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
@@ -177,7 +177,7 @@ def atomic_write_json(path: Path, data: Any) -> None:
     tmp = path.with_name(f"{path.name}.tmp-{uuid.uuid4().hex[:8]}")
     body = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     tmp.write_text(body, encoding="utf-8")
-    tmp.replace(path)
+    fileops.replace_atomic(tmp, path)
 
 
 def read_json(path: Path) -> Any:
@@ -373,7 +373,7 @@ def patch_login_session_account(fields: dict, edition: str | None = None) -> boo
 
     tmp = f.with_name(f.name + ".wbswitch-tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(f)
+    fileops.replace_atomic(tmp, f)
     _harden(f)
     return True
 
@@ -662,14 +662,44 @@ def restore_private(acc: Account) -> int:
     """把档案里的私有存储还原到 WorkBuddy 的 storage/user-{uid}-*。
 
     返回还原的文件数；档案没有私有副本时返回 0。
+
+    走"复制到临时目录 → 原子改名换入"：任何一步失败都不会把用户原有的
+    storage 删成空的（旧实现先 rmtree 再复制，复制失败就真丢了）。
     """
     src = acc.private_dir()
     if not src.exists():
         return 0
     dst = paths.user_storage_dir(acc.uid)
+    staging = dst.with_name(dst.name + ".wbswitch-new")
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+    try:
+        fileops.copy_tree(src, staging)
+    except OSError:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+    old = None
     if dst.exists():
-        shutil.rmtree(dst, ignore_errors=True)
-    shutil.copytree(src, dst)
+        old = dst.with_name(dst.name + ".wbswitch-old")
+        if old.exists():
+            shutil.rmtree(old, ignore_errors=True)
+        try:
+            fileops.replace_atomic(dst, old)
+        except OSError:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+    try:
+        fileops.replace_atomic(staging, dst)
+    except OSError:
+        if old is not None:  # 换入失败：把原目录放回去
+            try:
+                fileops.replace_atomic(old, dst)
+            except OSError:
+                pass
+        raise
+    if old is not None:
+        shutil.rmtree(old, ignore_errors=True)
     return sum(1 for p in dst.rglob("*") if p.is_file())
 
 
@@ -717,7 +747,7 @@ def _adopt_login_file(acc: Account, src: Path) -> int:
         shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.copy2(src, staging / src.name)
+        fileops.copy_file(src, staging / src.name)
     except OSError:
         shutil.rmtree(staging, ignore_errors=True)
         return 0
@@ -725,7 +755,11 @@ def _adopt_login_file(acc: Account, src: Path) -> int:
     dst = acc.session_dir()
     if dst.exists():
         shutil.rmtree(dst, ignore_errors=True)
-    staging.replace(dst)
+    try:
+        fileops.replace_atomic(staging, dst)
+    except OSError:
+        shutil.rmtree(staging, ignore_errors=True)
+        return 0
     _harden(dst, is_dir=True)
     for f in dst.glob("*.info"):
         _harden(f)
@@ -805,7 +839,7 @@ def restore_login_state(acc: Account) -> int:
     pick = main[0] if main else max(files, key=lambda p: p.stat().st_mtime)
 
     tmp = target.with_name(target.name + ".wbswitch-tmp")
-    shutil.copy2(pick, tmp)
-    tmp.replace(target)
+    fileops.copy_file(pick, tmp)
+    fileops.replace_atomic(tmp, target)
     _harden(target)
     return 1

@@ -34,7 +34,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import paths, profiles
+from . import fileops, paths, profiles
 from .i18n import t
 
 # --------------------------------------------------------------------------
@@ -426,7 +426,12 @@ def _create_backup_bound(
     paths.ensure_store_dirs()
     ts = time.strftime("%Y%m%d%H%M%S")
     tag, dest = _unique_backup_dir(tag or f"{ts}_{(target_uid or 'none')[:8]}")
-    dest.mkdir(parents=True, exist_ok=True)
+    # 先写到 *.partial，全部成功后再原子改名——半途失败不会在备份列表里
+    # 留下"只有一个 db、meta 都没有"的残骸（11/8 事故里就有两个）。
+    build = dest.with_name(dest.name + ".partial")
+    if build.exists():
+        shutil.rmtree(build, ignore_errors=True)
+    build.mkdir(parents=True, exist_ok=True)
 
     info = BackupInfo(
         tag=tag,
@@ -438,18 +443,23 @@ def _create_backup_bound(
         edition=edition,
     )
 
-    # 数据库（含 WAL/SHM，保证备份可用）
+    # 数据库：**必须**用 SQLite 在线备份，绝不直接复制文件。
+    # 客户端运行时在 workbuddy.db-shm 上持有字节锁，直接 copy 会抛
+    # `[WinError 33] 另一个程序已锁定文件的一部分`，整个换号就断在备份这一步。
+    skipped: list[str] = []
     try:
         conn = _db()
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         conn.close()
     except Exception:
         pass
-    for suffix in ("", "-wal", "-shm"):
-        src = Path(str(paths.db_path()) + suffix)
-        if src.exists():
-            shutil.copy2(src, dest / src.name)
+    db_path = paths.db_path()
+    if db_path.exists():
+        try:
+            fileops.snapshot_sqlite(db_path, build / db_path.name)
             info.has_db = True
+        except Exception as e:
+            raise RuntimeError(t("err.backup_failed", e=fileops.describe(e))) from e
 
     for name, flag in (
         ("memory", "has_memory"),
@@ -459,42 +469,56 @@ def _create_backup_bound(
     ):
         src = paths.workbuddy_dir() / name
         if src.exists():
-            shutil.copytree(src, dest / name, dirs_exist_ok=True)
+            missed = fileops.copy_tree(src, build / name)
+            skipped.extend(f"{name}/{m}" for m in missed)
             if flag:
-                setattr(info, flag, True)
+                try:
+                    setattr(info, flag, any(src.iterdir()))
+                except OSError:
+                    setattr(info, flag, True)
 
     # 客户端全局设置（含按账号隔离的 claw.users.{uid} 段）
     cfg = paths.settings_path()
     if cfg.exists():
-        shutil.copy2(cfg, dest / cfg.name)
-        info.has_settings = True
+        try:
+            fileops.copy_file(cfg, build / cfg.name)
+            info.has_settings = True
+        except OSError:
+            skipped.append(cfg.name)
 
     # 会话档案库：这是"换号后会话自动恢复"的本钱，必须跟备份一起走
     arch = paths.store_dir() / "sessions.db"
     if arch.exists():
-        shutil.copy2(arch, dest / arch.name)
-        info.has_sessions_archive = True
+        try:
+            fileops.snapshot_sqlite(arch, build / arch.name)
+            info.has_sessions_archive = True
+        except Exception:
+            skipped.append(arch.name)
 
     # 登录态（凭据文件）。两个版本的登录文件都收 —— 它们共用一个 auth
     # 目录，代价不过几十 KB，但回滚后不用重新登录。客户端运行时可能被
     # 占用，失败不致命：备份仍可用，只是回滚后需要重新登录。
-    sess_dst = dest / "session"
+    sess_dst = build / "session"
     copied_login = 0
     for ed in paths.edition_ids():
         for src in paths.login_state_files(ed):
             try:
                 if src.exists():
                     sess_dst.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, sess_dst / src.name)
+                    fileops.copy_file(src, sess_dst / src.name)
                     copied_login += 1
             except OSError:
                 pass
     info.has_login_state = copied_login > 0
 
     meta = asdict(info)
-    meta["size_bytes"] = _dir_size(dest)
+    meta["size_bytes"] = _dir_size(build)
     meta["app"] = "workbuddy-switch"
-    profiles.atomic_write_json(dest / "meta.json", meta)
+    # 被客户端占用而没备上的文件（不影响备份可用，但要让用户知道）
+    meta["skipped_files"] = len(skipped)
+    meta["skipped_sample"] = skipped[:10]
+    profiles.atomic_write_json(build / "meta.json", meta)
+    fileops.replace_atomic(build, dest)
 
     info.size_bytes = meta["size_bytes"]
     return info
@@ -506,8 +530,8 @@ def list_backups() -> list[BackupInfo]:
         return []
     out: list[BackupInfo] = []
     for entry in d.iterdir():
-        if not entry.is_dir():
-            continue
+        if not entry.is_dir() or entry.name.endswith(".partial"):
+            continue  # 写到一半的备份不参与列表/回滚
         meta = profiles.read_json_safe(entry / "meta.json") or {}
         info = BackupInfo(
             tag=str(meta.get("tag") or entry.name),
@@ -564,8 +588,12 @@ def _restore_backup_bound(info: BackupInfo) -> list[str]:
     if db_src.exists():
         for suffix in ("", "-wal", "-shm"):
             p = Path(str(paths.db_path()) + suffix)
-            p.unlink(missing_ok=True)
-        shutil.copy2(db_src, paths.db_path())
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                # -shm 可能仍被客户端锁定；它会被客户端重建，不致命
+                pass
+        fileops.copy_file(db_src, paths.db_path())
         done.append("workbuddy.db")
 
     for name in ("memory", "connectors", "storage", "tasks"):
@@ -581,7 +609,7 @@ def _restore_backup_bound(info: BackupInfo) -> list[str]:
     cfg_src = src / paths.settings_path().name
     if cfg_src.exists():
         try:
-            shutil.copy2(cfg_src, paths.settings_path())
+            fileops.copy_file(cfg_src, paths.settings_path())
             done.append("settings.json")
         except OSError:
             pass
@@ -591,9 +619,9 @@ def _restore_backup_bound(info: BackupInfo) -> list[str]:
     if arch_src.exists():
         try:
             paths.ensure_store_dirs()
-            shutil.copy2(arch_src, paths.store_dir() / "sessions.db")
+            fileops.snapshot_sqlite(arch_src, paths.store_dir() / "sessions.db")
             done.append("sessions.db")
-        except OSError:
+        except Exception:
             pass
 
     # 登录态：客户端已退出时才写得进去，失败不阻断其余还原。

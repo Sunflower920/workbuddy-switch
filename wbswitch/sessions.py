@@ -42,7 +42,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import paths
+from . import fileops, paths
 
 #: sessions 表的已知 schema。客户端 5.6.x 把表从 30 列扩到 40 列
 #  （新增 transport…unread），且升级后旧字面量会让复制/补回全部拒绝执行。
@@ -464,7 +464,7 @@ def _save_bodies_index(idx: dict) -> None:
         f = bodies_index_path()
         tmp = f.with_name(f.name + ".tmp")
         tmp.write_text(json.dumps(idx, ensure_ascii=False, indent=1), encoding="utf-8")
-        tmp.replace(f)
+        fileops.replace_atomic(tmp, f)
     except Exception:
         pass
 
@@ -1833,7 +1833,13 @@ def sync_sidebar_snapshot(uid: str, *, dry_run: bool = False) -> dict:
     snap.setdefault("version", 3)
     tmp = snap_path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(snap_path)
+    try:
+        fileops.replace_atomic(tmp, snap_path)
+    except OSError:
+        # 客户端正持有这份快照（读取中）；保留旧快照，下次再对齐
+        tmp.unlink(missing_ok=True)
+        return {"ok": False, "reason": "快照被客户端占用，稍后重试",
+                "total": len(items), "path": str(snap_path)}
     return {"ok": True, "total": len(items), "added": added,
             "removed": removed, "path": str(snap_path)}
 
