@@ -143,6 +143,29 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
                     _rank(sid, live_rows) > _rank(tgt_best[root], live_rows):
                 tgt_best[root] = sid
 
+    # 目标账号：同名会话（去掉空白/大小写差异）→ (sid, updated_at)。
+    # 用于拦住"谱系不同但其实是同一段对话"的回灌：早期副本没登记 parent，
+    # 只按 root 判断会把更旧的版本当成新会话复制进来，于是列表里一份变两份。
+    def _title_key(t: object) -> str:
+        return " ".join(str(t or "").split()).lower()
+
+    tgt_titles: dict[str, tuple[str, int]] = {}
+    for sid, owner in owner_map.items():
+        if owner != target_uid:
+            continue
+        row = live_rows.get(sid) or {}
+        if row.get("deleted_at"):
+            continue
+        key = _title_key(row.get("title"))
+        if not key:
+            continue
+        try:
+            upd = int(row.get("updated_at") or 0)
+        except (TypeError, ValueError):
+            upd = 0
+        if key not in tgt_titles or upd > tgt_titles[key][1]:
+            tgt_titles[key] = (sid, upd)
+
     plan = []
     for sid in sorted(s for s, o in owner_map.items() if o == source_uid):
         row = live_rows.get(sid) or {}
@@ -155,6 +178,18 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
         root = sessions._root_of(sid, parent)
         tgt_sid = tgt_best.get(root)
         if tgt_sid is None:
+            # 谱系上没有对应会话，但目标可能已有同名对话的新版本
+            # （早期副本未登记谱系）。目标那份更新 → 说明本地是更新的，
+            # 把旧的复制进来只会多一条同名会话，跳过。
+            peer = tgt_titles.get(_title_key(row.get("title")))
+            if peer and peer[0] != sid:
+                try:
+                    s_upd = int(row.get("updated_at") or 0)
+                except (TypeError, ValueError):
+                    s_upd = 0
+                if peer[1] >= s_upd:
+                    plan.append((sid, "skip", "目标有同名且更新的会话"))
+                    continue
             plan.append((sid, "copy", "目标没有同根源会话，纯新增"))
             continue
         s_size = _rank(sid, live_rows)[0]

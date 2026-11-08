@@ -11,8 +11,10 @@ Windows 用 tasklist / taskkill，macOS/Linux 用 pgrep / pkill。
 
 from __future__ import annotations
 
+import datetime
 import os
 import platform
+import re
 import shutil
 import subprocess
 import time
@@ -68,18 +70,57 @@ def _run(args: list[str]) -> str:
 # --------------------------------------------------------------------------
 
 
-def is_running(edition: str | None = None) -> bool:
-    """指定版本的客户端是否在运行（不关心另一个版本）。"""
+def _probe_running(edition: str | None = None) -> bool | None:
+    """进程探测：True=在跑 / False=没跑 / None=**探测本身失败**（未知）。
+
+    把"查不出来"和"确实没跑"分开很重要：切换要在客户端退出后才改写登录态，
+    如果 tasklist 超时被当成"没跑"，就会在客户端还活着时动它的文件，
+    随后再启动第二个实例 → 两个 daemon 抢同一套管道，客户端直接起不来。
+    """
     if in_sandbox():
         return False
     names = paths.process_names(edition)
     if SYSTEM == "Windows":
-        out = _run(["tasklist", "/FO", "CSV", "/NH"]).lower()
+        try:
+            p = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=20, **_no_window_kwargs(),
+            )
+        except Exception:
+            return None
+        if p.returncode != 0:
+            return None
+        out = (p.stdout or "").lower()
         return any(f'"{n}"' in out for n in names)
     for stem in paths.process_stems(edition):
         if shutil.which("pgrep") and _run(["pgrep", "-x", stem]).strip():
             return True
     return False
+
+
+def is_running(edition: str | None = None) -> bool:
+    """指定版本的客户端是否在运行（不关心另一个版本）。
+
+    探测失败时按"在运行"处理（fail-safe）：宁可让用户手动关客户端，
+    也不在它活着的时候改登录态 —— 那会造出第二个实例。
+    """
+    for _ in range(2):
+        state = _probe_running(edition)
+        if state is not None:
+            return state
+        time.sleep(0.4)
+    return True
+
+
+def wait_exit(edition: str | None = None, timeout: float = 10.0) -> bool:
+    """等待该版本全部进程退出；返回是否确认已退出。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _probe_running(edition) is False:
+            return True
+        time.sleep(0.3)
+    return _probe_running(edition) is False
 
 
 def running_pids(edition: str | None = None) -> list[int]:
@@ -138,7 +179,7 @@ def kill(edition: str | None = None, timeout: float = 8.0) -> bool:
 
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not is_running(edition):
+        if _probe_running(edition) is False:
             return True
         time.sleep(0.4)
 
@@ -147,11 +188,11 @@ def kill(edition: str | None = None, timeout: float = 8.0) -> bool:
             subprocess.run(["pkill", "-9", "-x", stem], capture_output=True)
         deadline = time.time() + 4
         while time.time() < deadline:
-            if not is_running(edition):
+            if _probe_running(edition) is False:
                 return True
             time.sleep(0.4)
 
-    return not is_running(edition)
+    return _probe_running(edition) is False
 
 
 def launch(path: str) -> None:
@@ -181,6 +222,82 @@ def restart(path: str, edition: str | None = None, wait: float = 1.0) -> bool:
         return False
     launch(path)
     return True
+
+
+# --------------------------------------------------------------------------
+# 启动健康检查
+#
+# 换号后客户端由我们拉起，如果它起不来（daemon 连崩、扩展服务退出），
+# 用户看到的是「Daemon 服务无法启动」弹窗 + 一个用不了的客户端。
+# 所以启动必须**验收**：读客户端自己的日志判断 daemon 是否就绪。
+# --------------------------------------------------------------------------
+
+
+def crash_reports_since(since: float) -> list[str]:
+    """launch 之后新产生的 daemon 崩溃报告（有就说明这次启动不健康）。"""
+    d = paths.workbuddy_dir() / "logs" / "Crash-Log"
+    out: list[str] = []
+    if not d.exists():
+        return out
+    for f in d.glob("crash-report-daemon-*.json"):
+        try:
+            if f.stat().st_mtime >= since:
+                out.append(f.name)
+        except OSError:
+            pass
+    return out
+
+
+def _log_epoch(iso: str) -> float:
+    try:
+        return datetime.datetime.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S").replace(
+            tzinfo=datetime.timezone.utc).timestamp()
+    except Exception:
+        return 0.0
+
+
+_TS_RE = re.compile(r'"timestamp"\s*:\s*"([^"]{19,})"')
+
+
+def daemon_ready_since(since: float) -> bool:
+    """客户端日志里是否出现 since 之后的 `daemon ready`。"""
+    log = paths.workbuddy_dir() / "logs" / "main.log"
+    if not log.exists():
+        return False
+    try:
+        size = log.stat().st_size
+        with open(log, "rb") as f:
+            f.seek(max(0, size - 512 * 1024))
+            data = f.read().decode("utf-8", "replace")
+    except OSError:
+        return False
+    for line in data.splitlines():
+        if "daemon ready" not in line:
+            continue
+        m = _TS_RE.search(line)
+        if not m:
+            continue
+        if _log_epoch(m.group(1)) >= since:
+            return True
+    return False
+
+
+def wait_healthy(edition: str | None = None, *, since: float | None = None,
+                 timeout: float = 45.0) -> bool:
+    """等客户端真正就绪；超时/崩溃/进程消失都算失败。"""
+    since = (time.time() - 3.0) if since is None else since
+    deadline = since + timeout
+    while time.time() < deadline:
+        if crash_reports_since(since):
+            return False
+        if daemon_ready_since(since):
+            return True
+        if _probe_running(edition) is False:
+            time.sleep(1.2)
+            if _probe_running(edition) is False:
+                return False
+        time.sleep(1.5)
+    return daemon_ready_since(since)
 
 
 # --------------------------------------------------------------------------

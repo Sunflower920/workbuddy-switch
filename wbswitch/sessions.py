@@ -35,6 +35,7 @@ WorkBuddy 的会话表用 `user_id` 做隔离，客户端**只显示当前登录
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
@@ -1120,6 +1121,27 @@ def _root_of(sid: str, parent: dict[str, str]) -> str:
     return cur
 
 
+def _content_signature(sid: str) -> str:
+    """正文内容指纹：把会话自己的 id 归一化后再哈希。
+
+    同一段对话的不同副本，正文里的 sessionId 都被替换成各自的 id，
+    直接哈希必然不同；把 id 抹成占位符后就能识别"其实是一份内容"。
+    用于谱系断链（早期副本没登记 parent）时的兜底分组。
+    """
+    body = paths.find_session_body(sid)
+    if body is None:
+        return ""
+    needle = sid.encode("ascii", "ignore")
+    h = hashlib.sha256()
+    try:
+        with open(body, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk.replace(needle, b"<sid>"))
+    except OSError:
+        return ""
+    return h.hexdigest()
+
+
 def copy_sessions(source_uid: str, target_uid: str | None = None, *,
                   dry_run: bool = False, on_progress=None) -> CopyReport:
     """把 source 账号名下的会话复制一份给 target（默认该版本的当前登录账号）。
@@ -1404,6 +1426,7 @@ class DedupeReport:
     backup_tag: str = ""
     quarantine: str = ""     # 被移除副本正文的隔离区目录
     dry_run: bool = False
+    note: str = ""           # 软删除等额外说明
     errors: list = field(default_factory=list)
 
     def ok(self) -> bool:
@@ -1504,11 +1527,12 @@ def _dedupe_sessions_bound(uid: str, *, dry_run: bool = False,
     if not uid:
         rep.errors.append("账号 uid 为空")
         return rep
-    if client_mod.is_running():
-        rep.errors.append(
-            "WorkBuddy 正在运行：去重需要写会话数据库与云端映射，请先结束客户端"
-        )
-        return rep
+    # 客户端运行时不能搬正文/改云端映射（会被抢锁，且可能留下空壳）。
+    # 但**可见的重复必须立刻消失**，所以退化为"软删除"：只把多余的行
+    # 标记 deleted_at（可逆），正文与工作区原地保留，客户端重启后即可见效果。
+    soft_only = client_mod.is_running()
+    if soft_only:
+        rep.note = "客户端运行中：仅隐藏重复项（正文保留），下次空闲时可彻底清理"
 
     capture()
     arch = _conn()
@@ -1546,14 +1570,43 @@ def _dedupe_sessions_bound(uid: str, *, dry_run: bool = False,
             return (size, upd, sid)
 
         dup_groups: list[tuple[str, list[str]]] = []
+        grouped: set[str] = set()
         for root, sids in by_root.items():
             if len(sids) < 2:
                 continue
             ordered = sorted(sids, key=_rank, reverse=True)
             dup_groups.append((root, ordered))
+            grouped.update(ordered)
             rep.groups += 1
             rep.kept += 1
             rep.removed += len(ordered) - 1
+
+        # 内容级兜底：早期副本没有登记谱系，root 不同但正文一字不差。
+        # 只对"标题相同"的会话算指纹，避免把几十 MB 正文全读一遍。
+        by_title: dict[str, list[str]] = {}
+        for sid in owned:
+            if sid in grouped:
+                continue
+            title = str(live_rows.get(sid, {}).get("title") or "")
+            if title:
+                by_title.setdefault(title, []).append(sid)
+        for title, sids in by_title.items():
+            if len(sids) < 2:
+                continue
+            by_sig: dict[str, list[str]] = {}
+            for sid in sids:
+                sig = _content_signature(sid)
+                if sig:
+                    by_sig.setdefault(sig, []).append(sid)
+            for _sig, group in by_sig.items():
+                if len(group) < 2:
+                    continue
+                ordered = sorted(group, key=_rank, reverse=True)
+                dup_groups.append((_root_of(ordered[0], parent), ordered))
+                rep.groups += 1
+                rep.kept += 1
+                rep.removed += len(ordered) - 1
+
         if dry_run or not dup_groups:
             return rep
 
@@ -1563,11 +1616,12 @@ def _dedupe_sessions_bound(uid: str, *, dry_run: bool = False,
 
         stamp = _now()
         trash = paths.store_dir() / "trash" / time.strftime("%Y%m%d-%H%M%S")
-        trash.mkdir(parents=True, exist_ok=True)
-        rep.quarantine = str(trash)
+        if not soft_only:
+            trash.mkdir(parents=True, exist_ok=True)
+            rep.quarantine = str(trash)
 
         edge_db = paths.edge_sync_db_path()
-        if edge_db is not None:
+        if edge_db is not None and not soft_only:
             try:
                 edge_conn = sqlite3.connect(str(edge_db))
                 edge_conn.execute("PRAGMA busy_timeout=8000")
@@ -1586,6 +1640,26 @@ def _dedupe_sessions_bound(uid: str, *, dry_run: bool = False,
         for root, ordered in dup_groups:
             kept_sid = ordered[0]
             for sid in ordered[1:]:
+                # 软删除模式（客户端在运行）：只把多余的行隐藏掉，正文原地保留。
+                if soft_only:
+                    try:
+                        live.execute(
+                            "UPDATE sessions SET deleted_at = ?"
+                            " WHERE id = ? AND deleted_at IS NULL",
+                            (int(time.time() * 1000), sid),
+                        )
+                        live.commit()
+                    except sqlite3.Error as e:
+                        rep.errors.append(f"{sid[:8]}: 隐藏重复项失败（{e}）")
+                        continue
+                    arch.execute(
+                        "INSERT OR REPLACE INTO dedupe_log"
+                        "(removed_sid, kept_sid, root_sid, owner_uid, removed_at)"
+                        " VALUES (?, ?, ?, ?, ?)",
+                        (sid, kept_sid, root, uid, stamp),
+                    )
+                    removed_sids.append(sid)
+                    continue
                 # ① 先删客户端索引并立即提交。
                 #    顺序很重要：先移正文再删行时，一旦删行失败（客户端抢锁/写库
                 #    被拒），正文已经进了隔离区而记录还在 → 变成「点开空白」的
@@ -1632,7 +1706,7 @@ def _dedupe_sessions_bound(uid: str, *, dry_run: bool = False,
                     (sid, uid_ed),
                 )
                 arch.execute(
-                    "INSERT INTO dedupe_log"
+                    "INSERT OR REPLACE INTO dedupe_log"
                     "(removed_sid, kept_sid, root_sid, owner_uid, removed_at)"
                     " VALUES (?, ?, ?, ?, ?)",
                     (sid, kept_sid, root, uid, stamp),

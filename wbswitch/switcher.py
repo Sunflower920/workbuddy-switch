@@ -278,6 +278,8 @@ def switch_to(
     if sess_uid:
         source_uid = sess_uid
     result.source_uid = source_uid
+    # 源账号档案（切换失败时用它把登录态原样放回去）
+    src_acc = profiles.find_by_uid(source_uid) if source_uid else None
 
     # ---- 凭据可用性预检：令牌过期就必须重新登录，工具无法代为刷新 ----
     # 这里只做「过期」判断（直接读磁盘上的凭据，可靠）；
@@ -361,7 +363,6 @@ def switch_to(
     #      ② 把 auth 目录里其它账号的历史会话也导入各自档案，
     #         这样它们都能免登录切换，而不只是最后一次登录的那个。
     if settings.switch_login_state and not dry_run and not client.is_running():
-        src_acc = profiles.find_by_uid(source_uid) if source_uid else None
         if src_acc is not None:
             try:
                 if profiles.snapshot_login_state(src_acc):
@@ -530,8 +531,25 @@ def switch_to(
             settings.client_path_for(target.edition), target.edition)
         if ok:
             try:
+                # 启动前把残留进程清干净：旧 daemon/sidecar 还活着时再拉一个实例，
+                # 两者会抢同一套命名管道，表现为「Daemon 服务多次异常退出」。
+                if client.is_running(target.edition):
+                    client.kill(target.edition)
+                    client.wait_exit(target.edition, timeout=8)
+                    time.sleep(1.0)
+                started = time.time()
                 if client.launch_ok(client_path):
                     result.launched = True
+                    if not client.wait_healthy(target.edition, since=started,
+                                               timeout=45):
+                        result.warnings.append(t("res.client_unhealthy"))
+                        # 起不来就回滚到原账号，别把用户晾在一个打不开的客户端上
+                        if settings.switch_login_state and _recover_startup(
+                                src_acc, client_path, target.edition):
+                            result.needs_login = False
+                            result.warnings.append(
+                                t("res.rolled_back_login",
+                                  name=(src_acc.name if src_acc else "")))
             except Exception as e:
                 result.warnings.append(f"launch failed: {e}")
         else:
@@ -554,6 +572,26 @@ def switch_to(
         },
     )
     return result
+
+
+def _recover_startup(src_acc, client_path: str, edition: str) -> bool:
+    """客户端启动异常时，把登录态回滚到原账号并重新拉起。
+
+    返回是否回滚后恢复成功。任何一步失败都返回 False（调用方据此告警），
+    绝不吞掉异常 —— 用户至少能从 warnings 里看到发生了什么。
+    """
+    try:
+        client.kill(edition)
+        if not client.wait_exit(edition, timeout=10):
+            return False
+        if src_acc is None or not profiles.restore_login_state(src_acc):
+            return False
+        time.sleep(1.0)
+        if not client.launch_ok(client_path):
+            return False
+        return client.wait_healthy(edition, since=time.time(), timeout=45)
+    except Exception:
+        return False
 
 
 def _write_identity_verified(primary: dict, want_uid: str, retries: int = 1) -> None:
