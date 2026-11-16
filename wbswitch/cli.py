@@ -523,6 +523,32 @@ def cmd_diagnose(args) -> int:
     return 0
 
 
+def cmd_unify(args) -> int:
+    """整理会话：清软删/空壳，把每个会话补齐到所有账号。"""
+    from . import unify
+
+    rep = unify.unify_sessions(dry_run=getattr(args, "dry_run", False))
+    if getattr(args, "json", False):
+        _emit_json(rep)
+        return 0 if not rep.get("errors") else 1
+    if rep.get("errors"):
+        for e in rep["errors"]:
+            _out("  ! " + str(e))
+    if rep.get("dry_run"):
+        _out(f"[dry-run] 将删除 {rep.get('planned_delete', 0)} 条软删/空壳/冗余，"
+             f"补齐 {rep.get('planned_copy', 0)} 条")
+        for p in rep.get("planned_titles", [])[:20]:
+            _out(f"  + {(p.get('title') or '')[:40]} -> {p['to']}")
+    else:
+        _out(f"已删除 {rep.get('removed_soft_deleted', 0)} 条，"
+             f"补齐 {len(rep.get('copied', []))} 条，"
+             f"恢复 {len(rep.get('restored', []))} 条")
+        for c in rep.get("copied", [])[:20]:
+            _out(f"  + {(c.get('title') or '')[:40]} -> {c['to']}")
+    _out("  " + i18n.t("res.restart_hint"))
+    return 0 if not rep.get("errors") else 1
+
+
 def cmd_sessions(args) -> int:
     """查看或操作会话档案库。"""
     if getattr(args, "sync_sidebar", None) is not None:
@@ -1382,6 +1408,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("diagnose", help="只读诊断")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_diagnose)
+
+    s = sub.add_parser("unify", help="整理会话：清软删/空壳，把每个会话补齐到所有账号")
+    s.add_argument("--dry-run", action="store_true", help="只报告会改什么，不落盘")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_unify)
 
     s = sub.add_parser("sessions", help="会话档案库：查看 / 留存 / 激活 / 划归")
     s.add_argument("--capture", action="store_true", help="把客户端当前会话收进档案库")

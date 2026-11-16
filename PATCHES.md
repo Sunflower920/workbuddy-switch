@@ -21,7 +21,8 @@
 | 文件 | 用途 |
 |---|---|
 | `wbswitch/smartmerge.py` | 内容感知合并：仅当源会话正文更大、或同大小但标题变化时才复制进目标，复制后旧原版由 dedupe 送隔离区 |
-| `wbswitch/cli.py` | `smart-merge` 子命令（`--source/--target/--no-dedupe/--dry-run/--json`，支持 `--envelope`） |
+| `wbswitch/unify.py` | 三账号会话整理（一次性运维）：按归一化标题分组，清除软删/无正文空壳/同账号内冗余副本，把每个会话补齐到所有账号。与 smart-merge 的"防回灌"判据分离，避免健康正文因"目标已有同源副本"而永远补不进只有软删/空壳的目标账号 |
+| `wbswitch/cli.py` | `smart-merge` 子命令（`--source/--target/--no-dedupe/--dry-run/--json`，支持 `--envelope`）；`unify` 子命令（`--dry-run/--json`，清软删空壳并把会话补齐到所有账号） |
 | `desktop/src-tauri/src/workbuddy.rs` | `wb_smart_merge` 命令（供界面调用） |
 | `desktop/src/workbuddy.js` | 账号卡片「智能合并」按钮（dry-run → 确认框 → 执行） |
 
