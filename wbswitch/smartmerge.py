@@ -22,13 +22,8 @@ import uuid
 from . import client as client_mod
 from . import engine, paths, profiles, sessions
 
-# 与 _copy_sessions_bound 完全一致的 INSERT 字面量
-_INSERT_30 = ("INSERT OR IGNORE INTO sessions VALUES ("
-              "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-              "?,?,?,?,?,?,?,?,?,?)")
-_INSERT_40 = ("INSERT OR IGNORE INTO sessions VALUES ("
-              "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-              "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+# INSERT 字面量已废弃：会话写入统一走 sessions._session_insert_sql(cols)，
+# 按客户端实际列名动态构造，兼容 5.11.3 的 42 列及后续任何扩展。
 _EDGE_SQL = ("INSERT OR REPLACE INTO edge_sync_mapping"
              "(session_id, conversation_id, msg_channel, created_at)"
              " VALUES (?, ?, ?, ?)")
@@ -124,11 +119,12 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
         live_rows = {d["id"]: d for d in
                      (dict(zip(lcols, r)) for r in cur.fetchall())}
         cols = [r[1] for r in live.execute("PRAGMA table_info(sessions)")]
-        n_cols = sessions._match_sessions_schema(cols)
-        if n_cols is None:
+        insert_sql = sessions._session_insert_sql(cols)
+        if insert_sql is None:
             return {"errors": [
-                f"客户端 sessions 表 schema 未识别（{len(cols)} 列）—— 请反馈"]}
-        insert_sql = _INSERT_30 if n_cols == 30 else _INSERT_40
+                "客户端 sessions 表缺少必需列（"
+                + ",".join(sessions._SESSION_REQUIRED_COLS)
+                + "）—— 表结构变化超出预期，请反馈"]}
     except sqlite3.Error as e:
         live.close()
         arch.close()
@@ -281,7 +277,7 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
             if rowd.get("title") and not rowd.get("custom_title"):
                 rowd["custom_title"] = rowd["title"]
             try:
-                live.execute(insert_sql, [rowd.get(c) for c in cols])
+                live.execute(insert_sql, sessions._session_values(cols, rowd))
             except sqlite3.Error as e:
                 failed += 1
                 report["errors"].append(f"{sid[:8]}: 写入会话索引失败（{e}）")
