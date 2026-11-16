@@ -116,6 +116,53 @@ def _session_values(cols, rowd: dict) -> list:
     return [rowd.get(str(c)) for c in cols]
 
 
+def remap_space_id(live, src_space_id, target_uid: str, cwd: str = ""):
+    """把源会话的 space_id 重映射到目标账号自己的同名 space。
+
+    WorkBuddy 5.11.3 起会话按 space_id 归属显示；若复制会话时把源账号的
+    space_id 原样带过去（指向别的 user 的 space），客户端加载时会按归属
+    过滤掉这条会话——表现就是"库里有、快照有，但界面只显示一部分"。
+
+    映射优先级：目标账号下 create_folder_path == cwd 的 space → 同名 space
+    → 都没有则置 None（无 space 的会话客户端正常显示，不会隐藏）。
+
+    容错：spaces 表不存在、源 space 查不到、目标无匹配，一律返回 None。
+    """
+    if not src_space_id:
+        return None
+    try:
+        has_spaces = live.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='spaces'"
+        ).fetchone()
+        if not has_spaces:
+            return None
+        # 源 space 本来就是目标账号的，保持不动
+        src = live.execute(
+            "SELECT user_id, name, create_folder_path FROM spaces WHERE id=?",
+            (src_space_id,)).fetchone()
+        if not src:
+            return None
+        if src[0] == target_uid:
+            return src_space_id
+        # 1) 目标账号下同路径的 space
+        if cwd:
+            hit = live.execute(
+                "SELECT id FROM spaces WHERE user_id=? AND create_folder_path=? "
+                "ORDER BY created_at LIMIT 1", (target_uid, cwd)).fetchone()
+            if hit:
+                return hit[0]
+        # 2) 目标账号下同名 space
+        if src[1]:
+            hit = live.execute(
+                "SELECT id FROM spaces WHERE user_id=? AND name=? "
+                "ORDER BY created_at LIMIT 1", (target_uid, src[1])).fetchone()
+            if hit:
+                return hit[0]
+    except sqlite3.Error:
+        pass
+    return None
+
+
 @dataclass
 class SessionStats:
     """档案库统计。"""
@@ -1347,6 +1394,11 @@ def _copy_sessions_bound(source_uid: str, target_uid: str | None = None,
             # ④ 客户端索引：新行（新 id + 目标 user_id，其余字段原样）
             rowd["id"] = new_sid
             rowd["user_id"] = report.target_uid
+            # space 归属重映射：避免把源账号的 space_id 带到目标账号，导致
+            # 客户端按 space 归属过滤时隐藏该会话（库里有、界面看不到）。
+            rowd["space_id"] = remap_space_id(
+                live, rowd.get("space_id"), report.target_uid,
+                rowd.get("cwd", ""))
             # 标题钉进 custom_title（用户改名槽）：客户端只重算 title（自动
             # 生成槽），副本带过来的标题进了 title 槽、custom_title 为空，
             # 等于没锁——在新消息触发自动标题重算时会被改写，表现为"改名了"

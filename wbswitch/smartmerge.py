@@ -272,6 +272,11 @@ def smart_merge(source_uid: str, target_uid: str | None = None, *,
             # ④ 客户端索引：新行（新 id + 目标 user_id，其余字段原样）
             rowd["id"] = new_sid
             rowd["user_id"] = target_uid
+            # space 归属重映射：源 space_id 指向别的账号会让会话在目标账号
+            # 界面被过滤隐藏（"库里有但看不到"）。映射到目标账号自己的同名
+            # space；没有则置 None（无 space 的会话照样正常显示）。
+            rowd["space_id"] = sessions.remap_space_id(
+                live, rowd.get("space_id"), target_uid, rowd.get("cwd", ""))
             # 标题钉进 custom_title（用户改名槽）：客户端只重算 title（自动
             # 生成槽），不锁的副本在新消息触发重算时会被改写，表现为"改名了"
             if rowd.get("title") and not rowd.get("custom_title"):

@@ -167,6 +167,24 @@ def unify_sessions(dry_run: bool = True) -> dict:
         if dry_run:
             report["planned_delete"] = len(to_delete)
             report["planned_copy"] = len(plan_copy)
+            # 预估 will-remap 的 space 串号数（只读）
+            space_bad = 0
+            try:
+                has_spaces = live.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='spaces'"
+                ).fetchone()
+                if has_spaces:
+                    sp_owner = {r[0]: r[1] for r in live.execute(
+                        "SELECT id,user_id FROM spaces")}
+                    for r in live.execute(
+                        "SELECT user_id, space_id FROM sessions "
+                        "WHERE deleted_at IS NULL AND space_id IS NOT NULL"
+                    ):
+                        if r[1] in sp_owner and sp_owner[r[1]] != r[0]:
+                            space_bad += 1
+            except sqlite3.Error:
+                pass
+            report["planned_space_remap"] = space_bad
             report["planned_titles"] = [
                 {"title": authoritative[k].get("title"), "to": u[:8]}
                 for k, _s, u in plan_copy[:30]
@@ -212,6 +230,9 @@ def unify_sessions(dry_run: bool = True) -> dict:
                 rowd["id"] = new_sid
                 rowd["user_id"] = uid
                 rowd["deleted_at"] = None
+                # space 归属重映射：不然后果是会话在目标账号被 space 过滤隐藏
+                rowd["space_id"] = sessions.remap_space_id(
+                    live, rowd.get("space_id"), uid, rowd.get("cwd", ""))
                 if rowd.get("title") and not rowd.get("custom_title"):
                     rowd["custom_title"] = rowd["title"]
                 try:
@@ -234,6 +255,26 @@ def unify_sessions(dry_run: bool = True) -> dict:
                     (new_sid, old_sid, src.get("user_id"), uid, stamp))
                 report["copied"].append(
                     {"title": src.get("title"), "to": uid[:8], "sid": new_sid[:8]})
+            # 4) 规范化已有会话的 space_id：修复历史复制遗留的"space 串号"
+            #    （会话 user_id=A 但 space_id 指向 B 账号的 space，客户端按归属
+            #    过滤会把会话隐藏，表现就是库里有/界面少）。逐条重映射到本账号
+            #    的同名 space；本账号无同名 space 则置 NULL。
+            space_fixed = 0
+            try:
+                for r in live.execute(
+                    "SELECT s.id, s.user_id, s.space_id, s.cwd "
+                    "FROM sessions s WHERE s.deleted_at IS NULL AND s.space_id IS NOT NULL"
+                ).fetchall():
+                    sid, owner_uid, spid, cwd = r
+                    fixed = sessions.remap_space_id(live, spid, owner_uid, cwd or "")
+                    if fixed != spid:
+                        live.execute(
+                            "UPDATE sessions SET space_id=? WHERE id=?", (fixed, sid))
+                        space_fixed += 1
+            except sqlite3.Error as e:
+                report["errors"].append(f"space_id 规范化失败: {e}")
+            report["space_remapped"] = space_fixed
+
             live.commit()
             arch.commit()
             try:

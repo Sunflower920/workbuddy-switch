@@ -1,17 +1,18 @@
 @echo off
 setlocal
 rem ============================================================
-rem  One-click unify: clean soft-deleted/empty sessions, then fill
-rem  every session into all 3 accounts. Pure ASCII on purpose
-rem  (cmd reads .bat as GBK).
+rem  One-click unify: clean soft-deleted/empty sessions, fill every
+rem  session into all 3 accounts, AND remap session space_id to the
+rem  owner account's own space (fixes sessions hidden in the UI).
+rem  Pure ASCII on purpose (cmd reads .bat as GBK).
 rem  Result log: C:\Users\WG-WYZ\.workbuddy-switch\unify-last.log
 rem ============================================================
 set "EXE=C:\Users\WG-WYZ\AppData\Local\SwitchSuite\sidecar\wbswitch\wbswitch.exe"
 set "LOG=C:\Users\WG-WYZ\.workbuddy-switch\unify-last.log"
 
 echo ============================================================
-echo  UNIFY sessions across 3 accounts.
-echo  Steps: quit WorkBuddy -^> clean + fill -^> reopen WorkBuddy.
+echo  UNIFY sessions across 3 accounts + fix space_id (hidden-session bug).
+echo  Steps: quit WorkBuddy -^> clean + fill + space-fix -^> reopen WorkBuddy.
 echo  A DB backup was already made before this (backups/pre-unify-*).
 echo  The chat with the agent will be interrupted - this is normal.
 echo  After WorkBuddy reopens, ask the agent to verify unify-last.log.

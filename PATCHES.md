@@ -15,6 +15,7 @@
 | `wbswitch/paths.py` | `DEFAULT_EDITION = "intl"` → `"cn"` | 本机为国内版：数据根 `~/.workbuddy`、进程 `WorkBuddy.exe`。上游默认 intl 会落到不存在的 `~/.workbuddy-ai` |
 | `wbswitch/profiles.py` | 旧档案 edition 兜底 `"intl"` → `"cn"` | 双版本改造前建的账号档案没有 edition 字段，按本机版本解析 |
 | `wbswitch/sessions.py` | 会话写入改为按**实际列名**动态构造 INSERT（新增 `_session_insert_sql` / `_session_values`），移除按列数分派的 30/40 列写死字面量 | WorkBuddy 5.11.3 把 `sessions` 表从 40 列扩到 42 列（新增 `space_id` / `released_from_automation_id`），旧代码 `_match_sessions_schema` 列数不匹配直接 `return`，导致会话复制/补回**全部静默失效**（表现为"同步没效果"）。动态列名后客户端再扩列无需改工具；只用必需列（id/cwd/user_id/created_at/updated_at）齐全作安全底线 |
+| `wbswitch/sessions.py` | 新增 `remap_space_id()`，三处复制路径（sessions/smartmerge/unify）统一调用；unify 落盘时顺带规范化已有会话的 `space_id` | 复制会话时 `rowd = dict(src)` 把源账号的 `space_id` 原样带走，指向**别的账号**的 space。客户端 5.11.3 按 space 归属显示，串号会话被过滤隐藏——表现就是"库里有、快照有，但界面少一条"（如 Sunflower 的"E大杂谈"两条只显示一条）。改为按 cwd/space 名映射到目标账号自己的同名 space，无匹配置 NULL |
 
 ### 引擎新增（复刻版自有功能，已收编进引擎）
 
