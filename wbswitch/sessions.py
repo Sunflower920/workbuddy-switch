@@ -78,11 +78,42 @@ _SESSION_INSERT_SQL = {
 
 
 def _match_sessions_schema(cols) -> int | None:
-    """PRAGMA 列序列与已知 schema（列数 + 列名 + 顺序）完全一致时返回列数。"""
+    """PRAGMA 列序列与已知 schema（列数 + 列名 + 顺序）完全一致时返回列数。
+
+    仅作诊断参考（判断客户端是否落在已知的 5.5.x / 5.6.x 上）。
+    写入路径**不再**依赖它——见 `_session_insert_sql`。
+    """
     known = _SESSION_SCHEMAS.get(len(cols))
     if known is not None and [str(c) for c in cols] == known:
         return len(cols)
     return None
+
+
+#: 无论客户端版本如何，sessions 表必须具备的 NOT NULL 且无默认值的列。
+#: 少任何一列都拒绝写入（宁可不做也不写坏客户端数据库）。
+_SESSION_REQUIRED_COLS = ("id", "cwd", "user_id", "created_at", "updated_at")
+
+
+def _session_insert_sql(cols) -> str | None:
+    """按当前表**实际列名**生成INSERT——客户端加列不再需要改工具代码。
+
+    历史教训：客户端 5.11.3 把 sessions 从 40 列扩到 42 列（新增
+    space_id / released_from_automation_id），按列数分派的 INSERT 全部拒绝
+    执行，表现为「同步完全没效果」。改为按列名拼接后，只要必需列齐全，
+    新增列自动纳入（payload 里没有的新列取 None，走列默认/NULL）。
+    列名来自客户端自己的 PRAGMA，仍做双引号转义防患。
+    """
+    names = [str(c) for c in cols]
+    if not set(_SESSION_REQUIRED_COLS).issubset(names):
+        return None
+    quoted = ", ".join('"' + n.replace('"', '""') + '"' for n in names)
+    marks = ", ".join("?" for _ in names)
+    return f"INSERT OR IGNORE INTO sessions ({quoted}) VALUES ({marks})"
+
+
+def _session_values(cols, rowd: dict) -> list:
+    """按当前表列名取 payload 值；payload 缺失的新列留 None（走列默认/NULL）。"""
+    return [rowd.get(str(c)) for c in cols]
 
 
 @dataclass
@@ -669,15 +700,14 @@ def _activate_for_bound(uid: str, rep: ActivateReport) -> ActivateReport:
         }
 
         # ---- 步骤 2：补回档案里有、客户端已丢失的会话 ----
-        # 整行按表声明顺序填值。INSERT 语句按列数分两个分支、各用一条
-        # 完整字面量（30 列 = 5.5.x schema，40 列 = 5.6.x schema）；
-        # 列数与列名序列都由 _match_sessions_schema 校验过才走到这里。
-        n_cols = _match_sessions_schema(cols_order)
-        if n_cols is None:
+        # 按当前表实际列名生成 INSERT（客户端加列不必改工具）。缺任一必需列
+        # 才拒绝并如实说明；否则逐行补回，新列取 None 走客户端默认值。
+        insert_sql = _session_insert_sql(cols_order)
+        if insert_sql is None:
             rep.detail = (
-                "sessions schema 未识别（"
-                + str(len(cols_order))
-                + " 列）；跳过补回，请反馈"
+                "sessions 表缺少必需列（"
+                + ",".join(_SESSION_REQUIRED_COLS)
+                + "）；跳过补回，请反馈"
             )
         else:
             for sid in owner_map:
@@ -686,22 +716,8 @@ def _activate_for_bound(uid: str, rep: ActivateReport) -> ActivateReport:
                 row = _payload_of(sid)
                 if not row or not row.get("id"):
                     continue
-                values = [row.get(c) for c in cols_order]
                 try:
-                    if n_cols == 30:
-                        live.execute(
-                            "INSERT OR IGNORE INTO sessions VALUES ("
-                            "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-                            "?,?,?,?,?,?,?,?,?,?)",
-                            values,
-                        )
-                    else:  # 40 列（客户端 5.6.x）
-                        live.execute(
-                            "INSERT OR IGNORE INTO sessions VALUES ("
-                            "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-                            "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                            values,
-                        )
+                    live.execute(insert_sql, _session_values(cols_order, row))
                     rep.inserted += 1
                 except sqlite3.Error:
                     pass
@@ -1236,14 +1252,14 @@ def _copy_sessions_bound(source_uid: str, target_uid: str | None = None,
     edge_conn = None
     try:
         cols = [r[1] for r in live.execute("PRAGMA table_info(sessions)")]
-        # schema 按列数查表（30 列 = 5.5.x / 40 列 = 5.6.x），列名序列也要一致；
-        # 不认识就拒绝复制 —— 宁可不做也不写坏客户端数据库
-        n_cols = _match_sessions_schema(cols)
-        if n_cols is None:
+        # 按当前表实际列名生成 INSERT；只要必需列齐全就放行，客户端新增列
+        # （space_id 等）自动纳入。缺必需列才拒绝 —— 宁可不做也不写坏客户端库。
+        insert_sql = _session_insert_sql(cols)
+        if insert_sql is None:
             report.errors.append(
-                "客户端 sessions 表 schema 未识别（"
-                + str(len(cols))
-                + " 列）—— 可能客户端又改了表结构，请反馈"
+                "客户端 sessions 表缺少必需列（"
+                + ",".join(_SESSION_REQUIRED_COLS)
+                + "）—— 表结构变化超出预期，请反馈"
             )
             return report
 
@@ -1337,20 +1353,7 @@ def _copy_sessions_bound(source_uid: str, target_uid: str | None = None,
             if rowd.get("title") and not rowd.get("custom_title"):
                 rowd["custom_title"] = rowd["title"]
             try:
-                if n_cols == 30:
-                    live.execute(
-                        "INSERT OR IGNORE INTO sessions VALUES ("
-                        "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-                        "?,?,?,?,?,?,?,?,?,?)",
-                        [rowd.get(c) for c in cols],
-                    )
-                else:  # 40 列（客户端 5.6.x）
-                    live.execute(
-                        "INSERT OR IGNORE INTO sessions VALUES ("
-                        "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-                        "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        [rowd.get(c) for c in cols],
-                    )
+                live.execute(insert_sql, _session_values(cols, rowd))
             except sqlite3.Error as e:
                 report.failed += 1
                 report.errors.append(f"{sid[:8]}: 写入会话索引失败（{e}）")

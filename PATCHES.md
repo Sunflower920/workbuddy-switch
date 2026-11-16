@@ -14,6 +14,7 @@
 |---|---|---|
 | `wbswitch/paths.py` | `DEFAULT_EDITION = "intl"` → `"cn"` | 本机为国内版：数据根 `~/.workbuddy`、进程 `WorkBuddy.exe`。上游默认 intl 会落到不存在的 `~/.workbuddy-ai` |
 | `wbswitch/profiles.py` | 旧档案 edition 兜底 `"intl"` → `"cn"` | 双版本改造前建的账号档案没有 edition 字段，按本机版本解析 |
+| `wbswitch/sessions.py` | 会话写入改为按**实际列名**动态构造 INSERT（新增 `_session_insert_sql` / `_session_values`），移除按列数分派的 30/40 列写死字面量 | WorkBuddy 5.11.3 把 `sessions` 表从 40 列扩到 42 列（新增 `space_id` / `released_from_automation_id`），旧代码 `_match_sessions_schema` 列数不匹配直接 `return`，导致会话复制/补回**全部静默失效**（表现为"同步没效果"）。动态列名后客户端再扩列无需改工具；只用必需列（id/cwd/user_id/created_at/updated_at）齐全作安全底线 |
 
 ### 引擎新增（复刻版自有功能，已收编进引擎）
 

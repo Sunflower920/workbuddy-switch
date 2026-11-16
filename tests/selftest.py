@@ -21,7 +21,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-REAL_WB = Path(os.environ.get("USERPROFILE", str(Path.home()))) / ".workbuddy-ai"
+#: 真实数据根。默认国际版（~/.workbuddy-ai）；国内版可用环境变量覆盖：
+#:   WBSWITCH_REAL_WB=C:\Users\<你>\.workbuddy python tests/selftest.py
+REAL_WB = Path(
+    os.environ.get("WBSWITCH_REAL_WB")
+    or (Path(os.environ.get("USERPROFILE", str(Path.home()))) / ".workbuddy-ai")
+)
 
 #: 沙箱里伪造的"另一个账号"。
 #: 必须是**合成的固定 uid**，不能用真实数据里出现过的 —— 否则一旦真实环境
